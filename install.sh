@@ -1658,7 +1658,15 @@ resolve_latest_tag() {
         echo "$tag"
         return 0
     fi
-    curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/jrangus/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+    tag=$(curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/jrangus/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    if [[ -n "${tag}" ]]; then
+        echo "${tag}"
+        return 0
+    fi
+    # New forks may only have the rolling pre-release. It is intentionally not
+    # returned by releases/latest, so fall back to it when it exists.
+    tag=$(curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/jrangus/3x-ui/releases/tags/dev-latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    [[ "${tag}" == "dev-latest" ]] && echo "${tag}"
 }
 
 # Releases publish <asset>.sha256 next to each archive. A mismatch or a failed
@@ -1713,7 +1721,8 @@ install_x-ui() {
     if [ $# == 0 ]; then
         tag_version=$(resolve_latest_tag)
         if [[ ! -n "$tag_version" ]]; then
-            echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
+            echo -e "${red}No installable release was found in jrangus/3x-ui.${plain}"
+            echo -e "${yellow}Run the Release 3X-UI workflow on main and wait for dev-latest to be published.${plain}"
             exit 1
         fi
         echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."

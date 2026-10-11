@@ -344,7 +344,10 @@ jobs:
   publish-dev:
     name: Publish rolling dev release
     needs: [build, build-windows]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # A fork's first release is commonly started with workflow_dispatch. Treat
+    # a manual run on main exactly like a push so it publishes dev-latest rather
+    # than leaving installable archives only in short-lived Actions artifacts.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write

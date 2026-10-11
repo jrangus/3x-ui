@@ -18,6 +18,10 @@ successfully, then verify that the repository's **Releases** page contains:
 Do not deploy until both the archive and checksum exist. The installer rejects
 an archive whose checksum cannot be verified.
 
+Manual `workflow_dispatch` runs on `main` publish the rolling `dev-latest`
+pre-release. When the fork has no stable release yet, the installer falls back
+to that pre-release automatically instead of reporting an API-limit error.
+
 ## 2. Install on a clean VPS
 
 Supported script installations require root and a supported Linux
