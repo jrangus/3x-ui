@@ -129,7 +129,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/install.sh)
+    bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/install.sh)
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -148,7 +148,7 @@ update() {
         fi
         return 0
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh)
+    bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/update.sh)
     if [[ $? == 0 ]]; then
         LOGI "Update is complete, Panel has automatically restarted "
         before_show_menu
@@ -166,7 +166,7 @@ update_dev() {
     fi
     # XUI_UPDATE_TAG tells update.sh to install the dev-latest pre-release
     # instead of the latest stable tag.
-    XUI_UPDATE_TAG="dev-latest" bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh)
+    XUI_UPDATE_TAG="dev-latest" bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/update.sh)
     if [[ $? == 0 ]]; then
         LOGI "Dev update is complete, Panel has automatically restarted "
         before_show_menu
@@ -213,11 +213,11 @@ replace_xui_script() {
 installed_script_url() {
     local ver
     ver=$("${xui_folder}/x-ui" -v 2> /dev/null | tr -d '[:space:]')
-    if [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && curl -fsIL -o /dev/null "https://raw.githubusercontent.com/MHSanaei/3x-ui/v${ver}/x-ui.sh"; then
-        echo "https://raw.githubusercontent.com/MHSanaei/3x-ui/v${ver}/x-ui.sh"
+    if [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && curl -fsIL -o /dev/null "https://raw.githubusercontent.com/jrangus/3x-ui/v${ver}/x-ui.sh"; then
+        echo "https://raw.githubusercontent.com/jrangus/3x-ui/v${ver}/x-ui.sh"
     else
         echo -e "${yellow}No x-ui.sh published for the installed version (${ver:-unknown}), using main${plain}" >&2
-        echo "https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.sh"
+        echo "https://raw.githubusercontent.com/jrangus/3x-ui/main/x-ui.sh"
     fi
 }
 
@@ -251,7 +251,7 @@ legacy_version() {
         exit 1
     fi
     # Use the entered panel version in the download link
-    install_command="bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x-ui/v$tag_version/install.sh") v$tag_version"
+    install_command="bash <(curl -Ls "https://raw.githubusercontent.com/jrangus/3x-ui/v$tag_version/install.sh") v$tag_version"
 
     echo "Downloading and installing panel version $tag_version..."
     eval $install_command
@@ -322,7 +322,7 @@ uninstall() {
     echo ""
     echo -e "Uninstalled Successfully.\n"
     echo "If you need to install this panel again, you can use below command:"
-    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)${plain}"
+    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/install.sh)${plain}"
     echo ""
     # Trap the SIGTERM signal
     trap delete_script SIGTERM
@@ -762,8 +762,9 @@ show_log() {
 }
 
 bbr_menu() {
-    echo -e "${green}\t1.${plain} Enable BBR"
+    echo -e "${green}\t1.${plain} Enable kernel BBR (v3 when supplied by the running kernel)"
     echo -e "${green}\t2.${plain} Disable BBR"
+    echo -e "${green}\t3.${plain} Show BBR status"
     echo -e "${green}\t0.${plain} Back to Main Menu"
     read -rp "Choose an option: " choice
     case "$choice" in
@@ -778,11 +779,205 @@ bbr_menu() {
             disable_bbr
             bbr_menu
             ;;
+        3)
+            show_bbr_status
+            bbr_menu
+            ;;
         *)
             echo -e "${red}Invalid option. Please select a valid number.${plain}\n"
             bbr_menu
             ;;
     esac
+}
+
+privacy_status() {
+    echo -e "${green}Server privacy status${plain}"
+    if command -v nft > /dev/null 2>&1 && nft list table inet xui_dns_guard > /dev/null 2>&1; then
+        echo "DNS egress guard: enabled"
+    else
+        echo "DNS egress guard: disabled"
+    fi
+    echo "Configured resolvers:"
+    awk '/^[[:space:]]*nameserver[[:space:]]+/ {print "  " $2}' /etc/resolv.conf 2> /dev/null || true
+    if command -v ss > /dev/null 2>&1; then
+        echo "Local DNS listeners:"
+        ss -H -lntu '( sport = :53 )' 2> /dev/null | sed 's/^/  /' || true
+    fi
+    if command -v ufw > /dev/null 2>&1; then
+        ufw status 2> /dev/null | sed -n '1p'
+    elif command -v firewall-cmd > /dev/null 2>&1; then
+        echo "firewalld: $(firewall-cmd --state 2> /dev/null || echo inactive)"
+    else
+        echo "Managed host firewall: not detected"
+    fi
+    echo -e "${yellow}WebRTC traffic that bypasses the client tunnel never reaches this server; use TUN and a client kill switch.${plain}"
+}
+
+enable_dns_egress_guard() {
+    local resolver bad=0
+    if ! command -v nft > /dev/null 2>&1; then
+        echo -e "${red}nftables is required. Install it before enabling the DNS guard.${plain}"
+        return 1
+    fi
+    if ! command -v systemctl > /dev/null 2>&1; then
+        echo -e "${red}Persistent DNS guard currently requires systemd.${plain}"
+        return 1
+    fi
+
+    # Blocking external port 53 is safe only when the host already uses a local
+    # encrypted/caching resolver. Otherwise package updates, ACME and the panel
+    # could all lose name resolution.
+    while read -r resolver; do
+        [[ -z "${resolver}" ]] && continue
+        case "${resolver}" in
+            127.* | ::1) ;;
+            *) bad=1 ;;
+        esac
+    done < <(awk '/^[[:space:]]*nameserver[[:space:]]+/ {print $2}' /etc/resolv.conf 2> /dev/null)
+    if [[ "${bad}" -ne 0 ]] || ! ss -H -lntu '( sport = :53 )' 2> /dev/null | grep -q .; then
+        echo -e "${red}Refusing to enable: no working loopback DNS stub was detected.${plain}"
+        echo "Configure an encrypted local resolver (for example systemd-resolved with DNS-over-TLS),"
+        echo "point /etc/resolv.conf at 127.0.0.1 or ::1, then retry. This safety check prevents a VPS lockout."
+        return 1
+    fi
+
+    cat > /etc/x-ui-dns-guard.nft <<'EOF'
+table inet xui_dns_guard {
+    chain output {
+        type filter hook output priority 0; policy accept;
+        oifname "lo" udp dport 53 accept
+        oifname "lo" tcp dport 53 accept
+        ip daddr 127.0.0.0/8 udp dport 53 accept
+        ip daddr 127.0.0.0/8 tcp dport 53 accept
+        ip6 daddr ::1 udp dport 53 accept
+        ip6 daddr ::1 tcp dport 53 accept
+        udp dport 53 reject
+        tcp dport 53 reject with tcp reset
+    }
+}
+EOF
+    cat > /etc/systemd/system/xui-dns-guard.service <<'EOF'
+[Unit]
+Description=x-ui DNS egress leak guard
+After=network.target
+Before=x-ui.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/sbin/nft delete table inet xui_dns_guard
+ExecStart=/usr/sbin/nft -f /etc/x-ui-dns-guard.nft
+ExecStop=-/usr/sbin/nft delete table inet xui_dns_guard
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    nft delete table inet xui_dns_guard > /dev/null 2>&1 || true
+    systemctl daemon-reload
+    if systemctl enable --now xui-dns-guard.service; then
+        echo -e "${green}External plaintext DNS (TCP/UDP 53) is now blocked; loopback DNS remains allowed.${plain}"
+    else
+        echo -e "${red}Failed to enable the DNS guard; rolling back.${plain}"
+        disable_dns_egress_guard
+        return 1
+    fi
+}
+
+disable_dns_egress_guard() {
+    if command -v systemctl > /dev/null 2>&1; then
+        systemctl disable --now xui-dns-guard.service > /dev/null 2>&1 || true
+        rm -f /etc/systemd/system/xui-dns-guard.service
+        systemctl daemon-reload
+    fi
+    command -v nft > /dev/null 2>&1 && nft delete table inet xui_dns_guard > /dev/null 2>&1 || true
+    rm -f /etc/x-ui-dns-guard.nft
+    echo -e "${green}DNS egress guard removed.${plain}"
+}
+
+privacy_open_port() {
+    local port proto source rule
+    read -rp "Port (1-65535): " port
+    [[ "${port}" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) || { echo -e "${red}Invalid port.${plain}"; return 1; }
+    read -rp "Protocol [tcp/udp, default tcp]: " proto
+    proto="${proto:-tcp}"
+    [[ "${proto}" == "tcp" || "${proto}" == "udp" ]] || { echo -e "${red}Invalid protocol.${plain}"; return 1; }
+    read -rp "Allowed source CIDR (blank = any): " source
+    if [[ -n "${source}" && ! "${source}" =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ ]]; then
+        echo -e "${red}Invalid source address/CIDR.${plain}"
+        return 1
+    fi
+    if command -v ufw > /dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
+        if [[ -n "${source}" ]]; then ufw allow from "${source}" to any port "${port}" proto "${proto}"; else ufw allow "${port}/${proto}"; fi
+    elif command -v firewall-cmd > /dev/null 2>&1 && firewall-cmd --state > /dev/null 2>&1; then
+        if [[ -n "${source}" ]]; then
+            rule="rule family=ipv4 source address=${source} port port=${port} protocol=${proto} accept"
+            firewall-cmd --permanent --add-rich-rule="${rule}" && firewall-cmd --reload
+        else
+            firewall-cmd --permanent --add-port="${port}/${proto}" && firewall-cmd --reload
+        fi
+    else
+        echo -e "${red}No active UFW or firewalld instance was detected; nothing was changed.${plain}"
+        return 1
+    fi
+    echo -e "${green}Opened ${port}/${proto}${source:+ for ${source}}.${plain}"
+}
+
+privacy_close_port() {
+    local port proto
+    read -rp "Port (1-65535): " port
+    [[ "${port}" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) || { echo -e "${red}Invalid port.${plain}"; return 1; }
+    read -rp "Protocol [tcp/udp, default tcp]: " proto
+    proto="${proto:-tcp}"
+    [[ "${proto}" == "tcp" || "${proto}" == "udp" ]] || { echo -e "${red}Invalid protocol.${plain}"; return 1; }
+    if command -v ufw > /dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
+        ufw --force delete allow "${port}/${proto}" || true
+    elif command -v firewall-cmd > /dev/null 2>&1 && firewall-cmd --state > /dev/null 2>&1; then
+        firewall-cmd --permanent --remove-port="${port}/${proto}" && firewall-cmd --reload
+    else
+        echo -e "${red}No active UFW or firewalld instance was detected; nothing was changed.${plain}"
+        return 1
+    fi
+    echo -e "${green}Closed the general ${port}/${proto} allow rule. Source-specific rules must be removed from the firewall directly.${plain}"
+}
+
+network_privacy_menu() {
+    echo -e "${green}\t1.${plain} Show privacy/network status"
+    echo -e "${green}\t2.${plain} Enable DNS egress leak guard"
+    echo -e "${green}\t3.${plain} Disable DNS egress leak guard"
+    echo -e "${green}\t4.${plain} Safely open a firewall port"
+    echo -e "${green}\t5.${plain} Close a firewall port"
+    echo -e "${green}\t0.${plain} Back to Main Menu"
+    read -rp "Choose an option: " choice
+    case "${choice}" in
+        0) show_menu ;;
+        1) privacy_status; network_privacy_menu ;;
+        2) enable_dns_egress_guard; network_privacy_menu ;;
+        3) disable_dns_egress_guard; network_privacy_menu ;;
+        4) privacy_open_port; network_privacy_menu ;;
+        5) privacy_close_port; network_privacy_menu ;;
+        *) echo -e "${red}Invalid option.${plain}"; network_privacy_menu ;;
+    esac
+}
+
+show_bbr_status() {
+    local kernel available active qdisc module
+    kernel="$(uname -r 2> /dev/null || echo unknown)"
+    available="$(sysctl -n net.ipv4.tcp_available_congestion_control 2> /dev/null || true)"
+    active="$(sysctl -n net.ipv4.tcp_congestion_control 2> /dev/null || true)"
+    qdisc="$(sysctl -n net.core.default_qdisc 2> /dev/null || true)"
+    module="$(lsmod 2> /dev/null | awk '$1 == "tcp_bbr" { print $1; exit }')"
+
+    echo "Kernel: ${kernel}"
+    echo "Available congestion controls: ${available:-unknown}"
+    echo "Active congestion control: ${active:-unknown}"
+    echo "Default qdisc: ${qdisc:-unknown}"
+    if [[ -n "${module}" ]]; then
+        echo "tcp_bbr module: loaded"
+    else
+        echo "tcp_bbr module: built-in or not loaded"
+    fi
+    echo -e "${yellow}Note: Linux exposes the algorithm as 'bbr' for every generation.${plain}"
+    echo -e "${yellow}A stable sysctl cannot prove whether a vendor kernel contains BBRv1, v2, or v3.${plain}"
 }
 
 disable_bbr() {
@@ -793,13 +988,21 @@ disable_bbr() {
     fi
 
     if [ -f "/etc/sysctl.d/99-bbr-x-ui.conf" ]; then
-        old_settings=$(head -1 /etc/sysctl.d/99-bbr-x-ui.conf | tr -d '#')
+        old_qdisc="$(sed -n 's/^# XUI_OLD_QDISC=//p' /etc/sysctl.d/99-bbr-x-ui.conf | head -1)"
+        old_cc="$(sed -n 's/^# XUI_OLD_CC=//p' /etc/sysctl.d/99-bbr-x-ui.conf | head -1)"
+        # Backward compatibility with the previous '#qdisc:cc' format.
+        if [[ -z "${old_qdisc}" || -z "${old_cc}" ]]; then
+            old_settings=$(head -1 /etc/sysctl.d/99-bbr-x-ui.conf | tr -d '#')
+            old_qdisc="${old_settings%:*}"
+            old_cc="${old_settings#*:}"
+        fi
         # sysctl -w already restores the live values, so no `sysctl --system`
         # afterwards — it would re-apply every sysctl file on the host and
         # surface unrelated errors from the distro's own defaults (see issue #5160)
-        sysctl -w net.core.default_qdisc="${old_settings%:*}"
-        sysctl -w net.ipv4.tcp_congestion_control="${old_settings#*:}"
+        [[ -n "${old_qdisc}" ]] && sysctl -w net.core.default_qdisc="${old_qdisc}"
+        [[ -n "${old_cc}" ]] && sysctl -w net.ipv4.tcp_congestion_control="${old_cc}"
         rm /etc/sysctl.d/99-bbr-x-ui.conf
+        rm -f /etc/modules-load.d/99-bbr-x-ui.conf
     else
         # Replace BBR with CUBIC configurations
         if [ -f "/etc/sysctl.conf" ]; then
@@ -822,10 +1025,26 @@ enable_bbr() {
         before_show_menu
     fi
 
-    # Enable BBR
+    # Load BBR when it is a module. A built-in implementation makes modprobe a
+    # harmless no-op/failure, so capability is verified through sysctl below.
+    modprobe tcp_bbr > /dev/null 2>&1 || true
+    available_cc="$(sysctl -n net.ipv4.tcp_available_congestion_control 2> /dev/null || true)"
+    if [[ ! " ${available_cc} " =~ [[:space:]]bbr[[:space:]] ]]; then
+        echo -e "${red}This running kernel does not provide BBR.${plain}"
+        echo -e "${yellow}Install a trusted distribution/vendor kernel containing BBRv3, reboot into it, then run this option again.${plain}"
+        echo -e "${yellow}The panel will not install an unsigned third-party kernel automatically.${plain}"
+        return 1
+    fi
+
+    # Enable BBR. Persist module loading as well as sysctl settings, while
+    # preserving the values that were active before x-ui changed them.
     if [ -d "/etc/sysctl.d/" ]; then
+        mkdir -p /etc/modules-load.d
+        echo "tcp_bbr" > /etc/modules-load.d/99-bbr-x-ui.conf
         {
-            echo "#$(sysctl -n net.core.default_qdisc):$(sysctl -n net.ipv4.tcp_congestion_control)"
+            echo "# Managed by x-ui; remove through the x-ui BBR menu."
+            echo "# XUI_OLD_QDISC=$(sysctl -n net.core.default_qdisc)"
+            echo "# XUI_OLD_CC=$(sysctl -n net.ipv4.tcp_congestion_control)"
             echo "net.core.default_qdisc = fq"
             echo "net.ipv4.tcp_congestion_control = bbr"
         } > "/etc/sysctl.d/99-bbr-x-ui.conf"
@@ -847,8 +1066,9 @@ enable_bbr() {
     fi
 
     # Verify that BBR is enabled
-    if [[ $(sysctl -n net.ipv4.tcp_congestion_control) == "bbr" ]]; then
-        echo -e "${green}BBR has been enabled successfully.${plain}"
+    if [[ $(sysctl -n net.ipv4.tcp_congestion_control) == "bbr" ]] && [[ $(sysctl -n net.core.default_qdisc) == "fq" ]]; then
+        echo -e "${green}Kernel BBR with fq pacing has been enabled successfully.${plain}"
+        show_bbr_status
     else
         echo -e "${red}Failed to enable BBR. Please check your system configuration.${plain}"
     fi
@@ -3537,13 +3757,14 @@ show_menu() {
 │  ${green}24.${plain} SSH Port Forwarding Management           │
 │  ${green}25.${plain} PostgreSQL Management                    │
 │────────────────────────────────────────────────│
-│  ${green}26.${plain} Enable BBR                               │
+│  ${green}26.${plain} BBR / BBRv3 Management                  │
 │  ${green}27.${plain} Update Geo Files                         │
 │  ${green}28.${plain} Speedtest by Ookla                       │
+│  ${green}29.${plain} Network Privacy & DNS Guard               │
 ╚────────────────────────────────────────────────╝
 "
     show_status
-    echo && read -rp "Please enter your selection [0-28]: " num
+    echo && read -rp "Please enter your selection [0-29]: " num
 
     case "${num}" in
         0)
@@ -3633,8 +3854,11 @@ show_menu() {
         28)
             run_speedtest
             ;;
+        29)
+            network_privacy_menu
+            ;;
         *)
-            LOGE "Please enter the correct number [0-28]"
+            LOGE "Please enter the correct number [0-29]"
             ;;
     esac
 }
@@ -3673,6 +3897,15 @@ if [[ $# > 0 ]]; then
             ;;
         "setup-fail2ban")
             setup_fail2ban_iplimit
+            ;;
+        "privacy-status")
+            privacy_status
+            ;;
+        "enable-dns-guard")
+            enable_dns_egress_guard
+            ;;
+        "disable-dns-guard")
+            disable_dns_egress_guard
             ;;
         "update")
             check_install 0 && update 0

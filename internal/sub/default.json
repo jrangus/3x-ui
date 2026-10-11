@@ -5,7 +5,7 @@
     "queryStrategy": "UseIP",
     "servers": [
       {
-        "address": "8.8.8.8",
+        "address": "https://8.8.8.8/dns-query",
         "skipFallback": false
       }
     ]
