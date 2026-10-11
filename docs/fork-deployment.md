@@ -80,25 +80,6 @@ and verify the downloaded archive against its published checksum.
 
 ## 5. Firewall and remote-access safety
 
-Preview rules for the effective SSH ports, current panel and subscription
-ports, and enabled local inbounds:
-
-```bash
-x-ui firewall-commands
-```
-
-Apply those rules to UFW or firewalld after an explicit confirmation:
-
-```bash
-x-ui firewall-sync
-```
-
-The sync adds allow rules only. It never enables or disables the firewall,
-removes existing rules, or opens ports for disabled, loopback-only, or remote
-node inbounds. Run it again after adding a node or changing its port. UDP
-transports including Hysteria2, TUIC, WireGuard, AmneziaWG, MASQUE, KCP, and
-QUIC are opened as UDP rather than TCP.
-
 Keep SSH allowed before enabling a host firewall. The privacy menu changes
 ports only through an already-active UFW or firewalld installation and never
 starts a firewall with guessed rules. Prefer source-restricted CIDRs for panel
