@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	_ "unsafe"
@@ -18,6 +20,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/crypto/nodetoken"
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
+	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/sub"
 	"github.com/mhsanaei/3x-ui/v3/internal/tunnelmonitor"
@@ -32,6 +35,96 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/op/go-logging"
 )
+
+type firewallPort struct {
+	Port  int
+	Proto string
+	Label string
+}
+
+func firewallProtocols(inbound *model.Inbound) []string {
+	switch inbound.Protocol {
+	case model.Hysteria, model.WireGuard, model.AmneziaWG, model.TUIC, model.MASQUE:
+		return []string{"udp"}
+	case model.Shadowsocks:
+		return []string{"tcp", "udp"}
+	}
+	var stream struct {
+		Network string `json:"network"`
+		Method  string `json:"method"`
+	}
+	_ = json.Unmarshal([]byte(inbound.StreamSettings), &stream)
+	network := strings.ToLower(strings.TrimSpace(stream.Network))
+	if network == "" {
+		network = strings.ToLower(strings.TrimSpace(stream.Method))
+	}
+	switch network {
+	case "kcp", "mkcp", "quic", "hysteria", "udp":
+		return []string{"udp"}
+	case "tcp,udp", "udp,tcp":
+		return []string{"tcp", "udp"}
+	default:
+		return []string{"tcp"}
+	}
+}
+
+func isLoopbackListen(listen string) bool {
+	listen = strings.Trim(strings.TrimSpace(listen), "[]")
+	return listen == "127.0.0.1" || listen == "::1" || strings.EqualFold(listen, "localhost")
+}
+
+// printFirewallPorts emits a stable, machine-readable list used by x-ui.sh.
+// It deliberately reports only enabled inbounds hosted on this machine.
+func printFirewallPorts() error {
+	if err := database.InitDB(config.GetDBPath()); err != nil {
+		return err
+	}
+	rules := make([]firewallPort, 0)
+	settings := service.SettingService{}
+	if port, err := settings.GetPort(); err == nil && port > 0 {
+		rules = append(rules, firewallPort{port, "tcp", "panel"})
+	}
+	if enabled, err := settings.GetSubEnable(); err == nil && enabled {
+		if port, err := settings.GetSubPort(); err == nil && port > 0 {
+			rules = append(rules, firewallPort{port, "tcp", "subscription"})
+		}
+	}
+	var inbounds []*model.Inbound
+	if err := database.GetDB().Where("enable = ? AND node_id IS NULL AND port > 0", true).Find(&inbounds).Error; err != nil {
+		return err
+	}
+	for _, inbound := range inbounds {
+		if isLoopbackListen(inbound.Listen) {
+			continue
+		}
+		label := strings.NewReplacer("\t", " ", "\r", " ", "\n", " ").Replace(inbound.Remark)
+		if label == "" {
+			label = string(inbound.Protocol)
+		}
+		for _, proto := range firewallProtocols(inbound) {
+			rules = append(rules, firewallPort{inbound.Port, proto, label})
+		}
+	}
+	sort.Slice(rules, func(i, j int) bool {
+		if rules[i].Port != rules[j].Port {
+			return rules[i].Port < rules[j].Port
+		}
+		if rules[i].Proto != rules[j].Proto {
+			return rules[i].Proto < rules[j].Proto
+		}
+		return rules[i].Label < rules[j].Label
+	})
+	seen := make(map[string]bool)
+	for _, rule := range rules {
+		key := fmt.Sprintf("%d/%s", rule.Port, rule.Proto)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		fmt.Printf("%d\t%s\t%s\n", rule.Port, rule.Proto, rule.Label)
+	}
+	return nil
+}
 
 // cliFallbackTokenName is the single token the CLI regenerates, so `-getApiToken`
 // cannot accumulate admin-equivalent credentials that are never revoked.
@@ -669,6 +762,11 @@ func main() {
 		migrateDb()
 	case "encrypt-tokens":
 		encryptNodeTokens()
+	case "firewall-ports":
+		if err := printFirewallPorts(); err != nil {
+			fmt.Println("firewall port discovery failed:", err)
+			os.Exit(1)
+		}
 	case "migrate-db":
 		if err := migrateDbCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Println(err)
@@ -771,6 +869,7 @@ Commands:
     migrate        migrate from other/old x-ui
     migrate-db     SQLite <-> .dump (--dump/--restore) or copy into PostgreSQL (--dsn)
     encrypt-tokens encrypt node bearer tokens with the configured active key
+	firewall-ports print enabled local panel/inbound ports as TSV
     setting        set settings
 `
 }

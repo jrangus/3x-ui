@@ -1263,6 +1263,8 @@ firewall_menu() {
     echo -e "${green}\t5.${plain} ${green}Enable${plain} Firewall"
     echo -e "${green}\t6.${plain} ${red}Disable${plain} Firewall"
     echo -e "${green}\t7.${plain} Firewall Status"
+    echo -e "${green}\t8.${plain} Generate rules for panel and enabled nodes"
+    echo -e "${green}\t9.${plain} Sync rules for panel and enabled nodes"
     echo -e "${green}\t0.${plain} Back to Main Menu"
     read -rp "Choose an option: " choice
     case "$choice" in
@@ -1297,6 +1299,14 @@ firewall_menu() {
             ufw status verbose
             firewall_menu
             ;;
+        8)
+            sync_firewall_rules preview
+            firewall_menu
+            ;;
+        9)
+            sync_firewall_rules apply
+            firewall_menu
+            ;;
         *)
             echo -e "${red}Invalid option. Please select a valid number.${plain}\n"
             firewall_menu
@@ -1318,16 +1328,90 @@ install_firewall() {
         echo "Firewall is already active"
     else
         echo "Activating firewall..."
-        # Open the necessary ports
-        ufw allow ssh
-        ufw allow http
-        ufw allow https
-        ufw allow 2053/tcp #webPort
-        ufw allow 2096/tcp #subport
+        # Discover the real SSH, panel, subscription and enabled inbound ports
+        # before enabling UFW. This prevents stale hard-coded ports from
+        # locking the operator out or breaking UDP-based nodes.
+        sync_firewall_rules apply ufw || return 1
 
         # Enable the firewall
         ufw --force enable
     fi
+}
+
+firewall_port_plan() {
+    local port
+    if command -v sshd > /dev/null 2>&1; then
+        while read -r port; do
+            [[ "${port}" =~ ^[0-9]+$ ]] && printf '%s\t%s\t%s\n' "${port}" tcp ssh
+        done < <(sshd -T 2> /dev/null | awk '$1 == "port" {print $2}' | sort -nu)
+    fi
+    # Fall back to 22 only when sshd cannot report its effective configuration.
+    if ! command -v sshd > /dev/null 2>&1 || ! sshd -T 2> /dev/null | grep -q '^port '; then
+        printf '22\ttcp\tssh\n'
+    fi
+    if [[ ! -x "${xui_folder}/x-ui" ]]; then
+        echo "ERROR: x-ui binary is not installed" >&2
+        return 1
+    fi
+    "${xui_folder}/x-ui" firewall-ports
+}
+
+sync_firewall_rules() {
+    local action="${1:-preview}" backend="${2:-}" port proto label key
+    local -A seen=()
+    local -a plan=()
+
+    while IFS=$'\t' read -r port proto label; do
+        [[ "${port}" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) || continue
+        [[ "${proto}" == "tcp" || "${proto}" == "udp" ]] || continue
+        key="${port}/${proto}"
+        [[ -n "${seen[$key]}" ]] && continue
+        seen[$key]=1
+        plan+=("${port}"$'\t'"${proto}"$'\t'"${label}")
+    done < <(firewall_port_plan)
+
+    if [[ ${#plan[@]} -eq 0 ]]; then
+        echo -e "${red}No required ports were discovered; no firewall changes were made.${plain}"
+        return 1
+    fi
+    if [[ -z "${backend}" ]]; then
+        if command -v ufw > /dev/null 2>&1; then
+            backend="ufw"
+        elif command -v firewall-cmd > /dev/null 2>&1; then
+            backend="firewalld"
+        else
+            echo -e "${red}Neither UFW nor firewalld is installed.${plain}"
+            return 1
+        fi
+    fi
+
+    echo "Required firewall rules (${backend}):"
+    for key in "${plan[@]}"; do
+        IFS=$'\t' read -r port proto label <<< "${key}"
+        if [[ "${backend}" == "ufw" ]]; then
+            echo "  ufw allow ${port}/${proto}    # ${label}"
+        else
+            echo "  firewall-cmd --permanent --add-port=${port}/${proto}    # ${label}"
+        fi
+    done
+    [[ "${action}" == "apply" ]] || return 0
+    confirm "Add these allow rules? Existing firewall rules will be kept." "y" || {
+        echo "Cancelled; no firewall changes were made."
+        return 2
+    }
+
+    for key in "${plan[@]}"; do
+        IFS=$'\t' read -r port proto label <<< "${key}"
+        if [[ "${backend}" == "ufw" ]]; then
+            ufw allow "${port}/${proto}" || return 1
+        else
+            firewall-cmd --permanent --add-port="${port}/${proto}" || return 1
+        fi
+    done
+    if [[ "${backend}" == "firewalld" ]]; then
+        firewall-cmd --reload || return 1
+    fi
+    echo -e "${green}Firewall rules synchronized. The firewall enable/disable state was not changed.${plain}"
 }
 
 open_ports() {
@@ -3927,6 +4011,12 @@ if [[ $# > 0 ]]; then
             if check_install 0 && update_all_geofiles 0; then
                 [[ $geo_updated -eq 0 ]] || restart 0
             fi
+            ;;
+        "firewall-commands")
+            check_install 0 && sync_firewall_rules preview
+            ;;
+        "firewall-sync")
+            check_install 0 && sync_firewall_rules apply
             ;;
         "migrateDB")
             migrate_db "$2" "$3"
