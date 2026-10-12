@@ -29,9 +29,37 @@ interface GeneralTabProps {
   updateSetting: (patch: Partial<AllSetting>) => void;
 }
 
+const regionalProfiles: Record<string, { region: string; language: string }> = {
+  'America/Los_Angeles': { region: 'US', language: 'en-US' },
+  'America/Denver': { region: 'US', language: 'en-US' },
+  'America/Chicago': { region: 'US', language: 'en-US' },
+  'America/New_York': { region: 'US', language: 'en-US' },
+  'America/Phoenix': { region: 'US', language: 'en-US' },
+  'America/Anchorage': { region: 'US', language: 'en-US' },
+  'Pacific/Honolulu': { region: 'US', language: 'en-US' },
+  'Asia/Tokyo': { region: 'JP', language: 'ja-JP' },
+  'Asia/Seoul': { region: 'KR', language: 'ko-KR' },
+  'Asia/Singapore': { region: 'SG', language: 'en-SG' },
+  'Asia/Hong_Kong': { region: 'HK', language: 'zh-HK' },
+  'Europe/London': { region: 'GB', language: 'en-GB' },
+  'Europe/Berlin': { region: 'DE', language: 'de-DE' },
+  'Europe/Paris': { region: 'FR', language: 'fr-FR' },
+  'Australia/Sydney': { region: 'AU', language: 'en-AU' },
+};
+
 export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProps) {
   const { t } = useTranslation();
   const { isMobile } = useMediaQuery();
+
+  const regionalProfile = useMemo(() => {
+    const timeZone = allSetting.timeLocation || 'Local';
+    const profile = regionalProfiles[timeZone];
+    return {
+      region: profile?.region || t('pages.settings.regionalProfileUnconfigured'),
+      timeZone,
+      language: profile?.language || t('pages.settings.regionalProfileUnconfigured'),
+    };
+  }, [allSetting.timeLocation, t]);
 
   const [lang, setLang] = useState<string>(() => LanguageManager.getLanguage());
   const [inboundOptions, setInboundOptions] = useState<{ label: string; value: string }[]>([]);
@@ -446,6 +474,27 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
           label: catTabLabel(<ClockCircleOutlined />, t('pages.settings.dateAndTime'), isMobile),
           children: (
             <>
+              <SettingListItem
+                paddings="small"
+                title={t('pages.settings.regionalProfileRegion')}
+                description={t('pages.settings.regionalProfileDesc')}
+              >
+                <Input value={regionalProfile.region} readOnly />
+              </SettingListItem>
+              <SettingListItem
+                paddings="small"
+                title={t('pages.settings.regionalProfileTimeZone')}
+                description={t('pages.settings.regionalProfileTimeZoneDesc')}
+              >
+                <Input value={regionalProfile.timeZone} readOnly />
+              </SettingListItem>
+              <SettingListItem
+                paddings="small"
+                title={t('pages.settings.regionalProfileLanguage')}
+                description={t('pages.settings.regionalProfileLanguageDesc')}
+              >
+                <Input value={regionalProfile.language} readOnly />
+              </SettingListItem>
               <SettingListItem
                 paddings="small"
                 title={t('pages.settings.timeZone')}
