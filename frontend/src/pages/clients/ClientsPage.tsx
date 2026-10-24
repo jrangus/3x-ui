@@ -443,6 +443,7 @@ export default function ClientsPage() {
   const [sortColumn, setSortColumn] = useState<string | null>(initialSort.column);
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend' | null>(initialSort.order);
   const [currentPage, setCurrentPage] = useState(1);
+  const [showSystemClients, setShowSystemClients] = useState(false);
   // Derived, not mirrored into state by an effect: an effect lags one render
   // behind the settings arriving, and that lag is what made the page fetch the
   // list once with the placeholder size and again with the real one.
@@ -527,6 +528,7 @@ export default function ClientsPage() {
       hasTgId: filters.hasTgId || undefined,
       hasComment: filters.hasComment || undefined,
       group: filters.groups.join(',') || undefined,
+      includeSystem: showSystemClients,
       sort: sortColumn || undefined,
       order: sortOrder || undefined,
     });
@@ -540,6 +542,7 @@ export default function ClientsPage() {
     effectiveInboundCsv,
     sortColumn,
     sortOrder,
+    showSystemClients,
   ]);
 
   const activeCount = activeFilterCount(filters);
@@ -1568,6 +1571,17 @@ export default function ClientsPage() {
                             label: t(o.labelKey),
                           }))}
                         />
+                        <Space size={6}>
+                          <Switch
+                            size="small"
+                            checked={showSystemClients}
+                            onChange={(checked) => {
+                              setShowSystemClients(checked);
+                              setCurrentPage(1);
+                            }}
+                          />
+                          <Typography.Text type="secondary">显示出口池系统客户端</Typography.Text>
+                        </Space>
                         {activeCount > 0 && (
                           <Button
                             size={isMobile ? 'small' : 'middle'}

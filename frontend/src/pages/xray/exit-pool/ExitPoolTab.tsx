@@ -74,6 +74,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
   const [slots, setSlots] = useState<number[]>([]);
   const [name, setName] = useState('Multi-region');
   const [subId, setSubId] = useState('');
+  const [exitSort, setExitSort] = useState<'region' | 'latency'>('region');
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -98,9 +99,24 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
+  const sortedExits = useMemo(() => {
+    const rows = [...(state?.exits || [])];
+    rows.sort((left, right) => {
+      if (exitSort === 'latency') {
+        const a = left.latencyMs && left.latencyMs > 0 ? left.latencyMs : Number.MAX_VALUE;
+        const b = right.latencyMs && right.latencyMs > 0 ? right.latencyMs : Number.MAX_VALUE;
+        return a - b || left.slot - right.slot;
+      }
+      const a = left.country || left.region || '';
+      const b = right.country || right.region || '';
+      return a.localeCompare(b, undefined, { sensitivity: 'base' }) || left.slot - right.slot;
+    });
+    return rows;
+  }, [exitSort, state?.exits]);
+
   const readyExits = useMemo(
-    () => (state?.exits || []).filter((exit) => exit.status === 'up'),
-    [state?.exits],
+    () => sortedExits.filter((exit) => exit.status === 'up'),
+    [sortedExits],
   );
 
   async function syncGroup() {
@@ -183,9 +199,20 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
         size="small"
         title={subId ? `编辑订阅组：${name}` : '创建多地区订阅组'}
         extra={
-          <Button loading={loading} onClick={() => void refresh()}>
-            刷新出口
-          </Button>
+          <Space>
+            <Select
+              value={exitSort}
+              onChange={setExitSort}
+              options={[
+                { value: 'region', label: '按地区排序' },
+                { value: 'latency', label: '按延迟排序' },
+              ]}
+              style={{ width: 130 }}
+            />
+            <Button loading={loading} onClick={() => void refresh()}>
+              刷新出口
+            </Button>
+          </Space>
         }
       >
         <Row gutter={[12, 12]}>
@@ -248,7 +275,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
           size="small"
           loading={loading}
           pagination={false}
-          dataSource={state?.exits || []}
+          dataSource={sortedExits}
           columns={[
             { title: '地区', render: (_, row: ExitRow) => row.country || row.region || '-' },
             { title: '出口 IP', dataIndex: 'exitIp' },
@@ -319,7 +346,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
         />
         <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
           创建后到“客户端”页面搜索上面的订阅
-          ID，可直接复制订阅地址。订阅中每个地区是一条独立节点，但都使用同一个服务器端口。
+          ID。出口池生成的身份默认不显示在普通客户端列表；需要复制订阅地址或排查时，可在客户端页面开启“显示出口池系统客户端”。订阅中的节点名称会显示订阅组、地区和出口编号，但都使用同一个服务器端口。
         </Typography.Paragraph>
       </Card>
     </Space>

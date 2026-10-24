@@ -63,6 +63,9 @@ type ClientPageParams struct {
 	HasTgID    string `form:"hasTgId"`
 	HasComment string `form:"hasComment"`
 	Group      string `form:"group"`
+	// Exit-pool identities are managed on the Xray exit-pool tab and stay out
+	// of the ordinary client table unless an administrator explicitly asks.
+	IncludeSystem bool `form:"includeSystem"`
 }
 
 // ClientPageResponse is the shape returned by ListPaged. `Total` is the
@@ -169,6 +172,7 @@ type clientQuery struct {
 	nowMs            int64
 	expireDiffMs     int64
 	trafficDiffBytes int64
+	includeSystem    bool
 }
 
 type clientQueryJoin struct {
@@ -209,6 +213,9 @@ func (q clientQuery) from() *gorm.DB {
 	tx := q.db.Table("clients AS c")
 	for _, j := range q.joins {
 		tx = tx.Joins(j.sql, j.args...)
+	}
+	if !q.includeSystem {
+		tx = tx.Where("COALESCE(c.group_name, '') NOT LIKE ?", exitPoolGroupPrefix+"%")
 	}
 	return tx
 }
@@ -397,9 +404,10 @@ func (s *ClientService) ListPaged(inboundSvc *InboundService, settingSvc *Settin
 
 	onlines := inboundSvc.GetOnlineClients()
 	q := newClientQuery(db, time.Now().UnixMilli(), expireDiffMs, trafficDiffBytes)
+	q.includeSystem = params.IncludeSystem
 
 	var total int64
-	if err := db.Model(&model.ClientRecord{}).Count(&total).Error; err != nil {
+	if err := q.from().Count(&total).Error; err != nil {
 		return nil, err
 	}
 
@@ -424,7 +432,7 @@ func (s *ClientService) ListPaged(inboundSvc *InboundService, settingSvc *Settin
 		}
 	}
 
-	groups, err := s.listGroupNames()
+	groups, err := s.listGroupNames(params.IncludeSystem)
 	if err != nil {
 		return nil, err
 	}
@@ -578,8 +586,12 @@ func (q clientQuery) onlineEmails(onlines []string) ([]string, int, error) {
 	count := 0
 	for _, batch := range chunkStrings(onlines, sqlInChunk) {
 		var page []string
-		if err := q.db.Model(&model.ClientRecord{}).
-			Where("COALESCE(enable, FALSE) = TRUE AND email IN ?", batch).
+		query := q.db.Model(&model.ClientRecord{}).
+			Where("COALESCE(enable, FALSE) = TRUE AND email IN ?", batch)
+		if !q.includeSystem {
+			query = query.Where("COALESCE(group_name, '') NOT LIKE ?", exitPoolGroupPrefix+"%")
+		}
+		if err := query.
 			Order("id ASC").
 			Pluck("email", &page).Error; err != nil {
 			return nil, 0, err
@@ -596,7 +608,7 @@ func (q clientQuery) onlineEmails(onlines []string) ([]string, int, error) {
 // the stored groups plus any name a client still carries. ListGroups also sums
 // per-client traffic per group, which this page never reads and which costs a
 // full join over client_traffics on every poll.
-func (s *ClientService) listGroupNames() ([]string, error) {
+func (s *ClientService) listGroupNames(includeSystem bool) ([]string, error) {
 	db := database.GetDB()
 	var stored []string
 	if err := db.Model(&model.ClientGroup{}).Pluck("name", &stored).Error; err != nil {
@@ -614,6 +626,9 @@ func (s *ClientService) listGroupNames() ([]string, error) {
 	for _, list := range [][]string{stored, used} {
 		for _, name := range list {
 			if name == "" {
+				continue
+			}
+			if !includeSystem && strings.HasPrefix(name, exitPoolGroupPrefix) {
 				continue
 			}
 			if _, dup := seen[name]; dup {

@@ -137,6 +137,34 @@ func setupPagingServices(t *testing.T) (*ClientService, *InboundService, *Settin
 	return &ClientService{}, &InboundService{}, settingSvc
 }
 
+func TestListPagedHidesExitPoolSystemClientsByDefault(t *testing.T) {
+	svc, inboundSvc, settingSvc := setupPagingServices(t)
+	db := database.GetDB()
+	rows := []model.ClientRecord{
+		{Email: "ordinary@x", SubID: "ordinary-sub", Enable: true, Group: "staff"},
+		{Email: "xnv3-pool-us@exit.local", SubID: "pool-shared", Enable: true, Group: exitPoolGroupPrefix + "World"},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed clients: %v", err)
+	}
+
+	visible, err := svc.ListPaged(inboundSvc, settingSvc, ClientPageParams{PageSize: 25})
+	if err != nil {
+		t.Fatalf("ListPaged default: %v", err)
+	}
+	if got := clientEmails(visible.Items); !slices.Equal(got, []string{"ordinary@x"}) {
+		t.Fatalf("default clients = %v", got)
+	}
+
+	all, err := svc.ListPaged(inboundSvc, settingSvc, ClientPageParams{PageSize: 25, IncludeSystem: true})
+	if err != nil {
+		t.Fatalf("ListPaged include system: %v", err)
+	}
+	if got := clientEmails(all.Items); !slices.Equal(got, []string{"ordinary@x", "xnv3-pool-us@exit.local"}) {
+		t.Fatalf("all clients = %v", got)
+	}
+}
+
 func TestListPagedFilters(t *testing.T) {
 	svc, inboundSvc, settingSvc := setupPagingServices(t)
 	now, _ := seedPagingClients(t)

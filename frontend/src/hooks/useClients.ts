@@ -77,6 +77,7 @@ export interface ClientQueryParams {
   hasTgId?: 'yes' | 'no' | '';
   hasComment?: 'yes' | 'no' | '';
   group?: string;
+  includeSystem?: boolean;
 }
 
 const DEFAULT_QUERY: ClientQueryParams = { page: 1, pageSize: 25 };
@@ -134,6 +135,7 @@ function buildQS(p: ClientQueryParams): string {
   if (p.hasTgId) sp.set('hasTgId', p.hasTgId);
   if (p.hasComment) sp.set('hasComment', p.hasComment);
   if (p.group) sp.set('group', p.group);
+  if (p.includeSystem) sp.set('includeSystem', 'true');
   return sp.toString();
 }
 

@@ -27,6 +27,7 @@ const (
 	exitPoolClientPrefix   = "xnv3-"
 	exitPoolClientDomain   = "@exit.local"
 	exitPoolOutboundPrefix = "xnv3-exit-"
+	exitPoolGroupPrefix    = "Exit Pool / "
 )
 
 var exitPoolSubIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{6,40}$`)
@@ -128,6 +129,29 @@ func parseExitPoolComment(value string) (ExitPoolMember, bool) {
 		return ExitPoolMember{}, false
 	}
 	return ExitPoolMember{Slot: slot, Region: p[2], Country: p[3], ExitIP: p[4]}, true
+}
+
+// ExitPoolClientDisplayName returns the stable, region-aware name used by
+// subscription renderers. It intentionally overrides a global remark template:
+// otherwise every identity on the same mother inbound can receive one identical
+// node name in clients such as v2rayN.
+func ExitPoolClientDisplayName(client model.Client) (string, bool) {
+	if !strings.HasPrefix(client.Group, exitPoolGroupPrefix) {
+		return "", false
+	}
+	member, ok := parseExitPoolComment(client.Comment)
+	if !ok {
+		return "", false
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(client.Group, exitPoolGroupPrefix))
+	region := strings.TrimSpace(member.Region)
+	if region == "" {
+		region = strings.TrimSpace(member.Country)
+	}
+	if name == "" || region == "" {
+		return "", false
+	}
+	return fmt.Sprintf("%s-%s-S%d", name, region, member.Slot), true
 }
 
 func readExitPoolFile(name string, limit int64) ([]byte, error) {
@@ -420,7 +444,7 @@ func (s *ExitPoolService) Sync(userID int, req ExitPoolSyncRequest) (ExitPoolGro
 		if _, ok := existing[e.Slot]; ok {
 			continue
 		}
-		client := model.Client{Email: exitPoolEmail(req.SubID, e), SubID: req.SubID, Group: "Exit Pool / " + req.Name, Comment: exitPoolComment(e), Enable: true, TrafficReset: "never", Security: "auto"}
+		client := model.Client{Email: exitPoolEmail(req.SubID, e), SubID: req.SubID, Group: exitPoolGroupPrefix + req.Name, Comment: exitPoolComment(e), Enable: true, TrafficReset: "never", Security: "auto"}
 		needRestart, createErr := s.ClientService.Create(&s.InboundService, &ClientCreatePayload{Client: client, InboundIds: []int{req.InboundID}, AllowSharedSubID: true})
 		if needRestart {
 			s.XrayService.SetToNeedRestart()
