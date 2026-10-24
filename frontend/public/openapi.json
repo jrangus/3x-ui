@@ -4858,6 +4858,10 @@
       "description": "Manage scoped Bearer tokens for programmatic auth. Tokens grant admin, monitor, or node-sync access, may expire, and are stored as SHA-256 hashes. The plaintext is returned only once at creation."
     },
     {
+      "name": "Multi-country Exit Pool",
+      "description": "Create and maintain subscription groups whose client identities share one local VLESS, VMess, or Trojan inbound while routing through different xnvgatebox exits."
+    },
+    {
       "name": "Xray Settings",
       "description": "Xray configuration template, outbound management, Warp/Nord/PIA integration, and config testing. All endpoints under /panel/api/xray."
     },
@@ -13449,6 +13453,127 @@
                 },
                 "example": {
                   "success": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/exit-pool": {
+      "get": {
+        "tags": [
+          "Multi-country Exit Pool"
+        ],
+        "summary": "Return installation state, ready regional exits, compatible local inbounds, and existing managed subscription groups.",
+        "operationId": "get_panel_api_exit_pool",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/exit-pool/sync": {
+      "post": {
+        "tags": [
+          "Multi-country Exit Pool"
+        ],
+        "summary": "Create a multi-region subscription group or synchronize the selected exits of an existing group.",
+        "operationId": "post_panel_api_exit_pool_sync",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "inboundId": 1,
+                "slots": [
+                  1,
+                  2,
+                  3
+                ],
+                "name": "Multi-region",
+                "subId": "pool-example"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/exit-pool/delete/{subId}": {
+      "post": {
+        "tags": [
+          "Multi-country Exit Pool"
+        ],
+        "summary": "Delete a managed subscription group together with its generated clients, routing rules, and unused managed outbounds.",
+        "operationId": "post_panel_api_exit_pool_delete_subId",
+        "parameters": [
+          {
+            "name": "subId",
+            "in": "path",
+            "required": true,
+            "description": "Managed exit-pool subscription ID.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
                 }
               }
             }
