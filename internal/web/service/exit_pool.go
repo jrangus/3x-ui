@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -170,7 +171,14 @@ func (s *ExitPoolService) loadExits() ([]ExitPoolExit, error) {
 	client := &http.Client{Timeout: 8 * time.Second, Jar: jar}
 	root := fmt.Sprintf("http://127.0.0.1:%d/%s", settings.Port, base)
 	form := url.Values{"password": {password}}
-	resp, err := client.PostForm(root+"/login", form)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	loginReq, err := http.NewRequestWithContext(ctx, http.MethodPost, root+"/login", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(loginReq)
 	if err != nil {
 		return nil, fmt.Errorf("connect to xnvgatebox: %w", err)
 	}
@@ -179,7 +187,11 @@ func (s *ExitPoolService) loadExits() ([]ExitPoolExit, error) {
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
 		return nil, fmt.Errorf("xnvgatebox login returned HTTP %d", resp.StatusCode)
 	}
-	resp, err = client.Get(root + "/api/exits")
+	exitsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, root+"/api/exits", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err = client.Do(exitsReq)
 	if err != nil {
 		return nil, fmt.Errorf("read xnvgatebox exits: %w", err)
 	}
@@ -455,70 +467,166 @@ func (s *ExitPoolService) Sync(userID int, req ExitPoolSyncRequest) (ExitPoolGro
 
 func (s *ExitPoolService) writeRoutingForSub(inbound *model.Inbound, subID string, desired []ExitPoolExit, managedEmails map[string]bool) error {
 	raw, err := s.SettingService.GetXrayConfigTemplate()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	var cfg map[string]any
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil { return err }
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return err
+	}
 	outbounds, _ := cfg["outbounds"].([]any)
 	byTag := map[string]map[string]any{}
 	kept := make([]any, 0, len(outbounds)+len(desired))
 	for _, item := range outbounds {
-		m, ok := item.(map[string]any); if !ok { kept = append(kept, item); continue }
+		m, ok := item.(map[string]any)
+		if !ok {
+			kept = append(kept, item)
+			continue
+		}
 		tag, _ := m["tag"].(string)
-		if strings.HasPrefix(tag, exitPoolOutboundPrefix) { byTag[tag] = m } else { kept = append(kept, item) }
+		if strings.HasPrefix(tag, exitPoolOutboundPrefix) {
+			byTag[tag] = m
+		} else {
+			kept = append(kept, item)
+		}
 	}
 	for _, e := range desired {
-		server := map[string]any{"address":"127.0.0.1", "port":e.Port}
-		if e.SocksUser != "" { server["users"] = []any{map[string]any{"user":e.SocksUser,"pass":e.SocksPass}} }
-		byTag[exitPoolOutboundTag(e.Slot)] = map[string]any{"tag":exitPoolOutboundTag(e.Slot),"protocol":"socks","settings":map[string]any{"servers":[]any{server}}}
+		server := map[string]any{"address": "127.0.0.1", "port": e.Port}
+		if e.SocksUser != "" {
+			server["users"] = []any{map[string]any{"user": e.SocksUser, "pass": e.SocksPass}}
+		}
+		byTag[exitPoolOutboundTag(e.Slot)] = map[string]any{"tag": exitPoolOutboundTag(e.Slot), "protocol": "socks", "settings": map[string]any{"servers": []any{server}}}
 	}
-	tags := make([]string, 0, len(byTag)); for tag := range byTag { tags = append(tags, tag) }; slices.Sort(tags)
-	for _, tag := range tags { kept = append(kept, byTag[tag]) }
+	tags := make([]string, 0, len(byTag))
+	for tag := range byTag {
+		tags = append(tags, tag)
+	}
+	slices.Sort(tags)
+	for _, tag := range tags {
+		kept = append(kept, byTag[tag])
+	}
 	cfg["outbounds"] = kept
-	routing, _ := cfg["routing"].(map[string]any); if routing == nil { routing = map[string]any{} }
-	rules, _ := routing["rules"].([]any); cleaned := make([]any, 0, len(rules)+len(desired))
+	routing, _ := cfg["routing"].(map[string]any)
+	if routing == nil {
+		routing = map[string]any{}
+	}
+	rules, _ := routing["rules"].([]any)
+	cleaned := make([]any, 0, len(rules)+len(desired))
 	for _, item := range rules {
-		m, ok := item.(map[string]any); if !ok || !isManagedExitPoolRule(m) { cleaned = append(cleaned, item); continue }
-		remove := false; for _, user := range stringSlice(m["user"]) { if managedEmails[user] { remove = true; break } }
-		if !remove { cleaned = append(cleaned, item) }
+		m, ok := item.(map[string]any)
+		if !ok || !isManagedExitPoolRule(m) {
+			cleaned = append(cleaned, item)
+			continue
+		}
+		remove := false
+		for _, user := range stringSlice(m["user"]) {
+			if managedEmails[user] {
+				remove = true
+				break
+			}
+		}
+		if !remove {
+			cleaned = append(cleaned, item)
+		}
 	}
-	for i := len(desired)-1; i >= 0; i-- {
-		e := desired[i]; email := exitPoolEmail(subID, e)
-		cleaned = append([]any{map[string]any{"type":"field","network":"tcp,udp","inboundTag":[]any{inbound.Tag},"user":[]any{email},"outboundTag":exitPoolOutboundTag(e.Slot)}}, cleaned...)
+	for i := len(desired) - 1; i >= 0; i-- {
+		e := desired[i]
+		email := exitPoolEmail(subID, e)
+		cleaned = append([]any{map[string]any{"type": "field", "network": "tcp,udp", "inboundTag": []any{inbound.Tag}, "user": []any{email}, "outboundTag": exitPoolOutboundTag(e.Slot)}}, cleaned...)
 	}
-	routing["rules"] = cleaned; cfg["routing"] = routing
-	blob, err := json.Marshal(cfg); if err != nil { return err }
+	routing["rules"] = cleaned
+	cfg["routing"] = routing
+	blob, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
 	return s.XraySettingService.SaveXraySetting(string(blob))
 }
 
 func (s *ExitPoolService) Delete(subID string) error {
-	if !exitPoolSubIDPattern.MatchString(subID) { return errors.New("invalid subId") }
-	clients, err := s.ClientService.List(); if err != nil { return err }
+	if !exitPoolSubIDPattern.MatchString(subID) {
+		return errors.New("invalid subId")
+	}
+	clients, err := s.ClientService.List()
+	if err != nil {
+		return err
+	}
 	emails := map[string]bool{}
 	for _, row := range clients {
 		if row.SubID == subID && strings.HasPrefix(row.Email, exitPoolClientPrefix) && strings.HasSuffix(row.Email, exitPoolClientDomain) {
 			emails[row.Email] = true
 			needRestart, deleteErr := s.ClientService.DeleteByEmail(&s.InboundService, row.Email, false)
-			if needRestart { s.XrayService.SetToNeedRestart() }
-			if deleteErr != nil { return deleteErr }
+			if needRestart {
+				s.XrayService.SetToNeedRestart()
+			}
+			if deleteErr != nil {
+				return deleteErr
+			}
 		}
 	}
-	if len(emails) == 0 { return errors.New("exit-pool group not found") }
-	raw, err := s.SettingService.GetXrayConfigTemplate(); if err != nil { return err }
-	var cfg map[string]any; if err := json.Unmarshal([]byte(raw), &cfg); err != nil { return err }
-	routing, _ := cfg["routing"].(map[string]any); if routing == nil { routing = map[string]any{} }
-	rules, _ := routing["rules"].([]any); cleaned := make([]any, 0, len(rules)); usedTags := map[string]bool{}
-	for _, item := range rules {
-		m, ok := item.(map[string]any); remove := false
-		if ok && isManagedExitPoolRule(m) { for _, user := range stringSlice(m["user"]) { if emails[user] { remove = true; break } } }
-		if !remove { cleaned = append(cleaned, item); if ok { if tag, _ := m["outboundTag"].(string); strings.HasPrefix(tag, exitPoolOutboundPrefix) { usedTags[tag] = true } } }
+	if len(emails) == 0 {
+		return errors.New("exit-pool group not found")
 	}
-	routing["rules"] = cleaned; cfg["routing"] = routing
-	outbounds, _ := cfg["outbounds"].([]any); kept := make([]any, 0, len(outbounds))
-	for _, item := range outbounds { m, ok := item.(map[string]any); if ok { tag, _ := m["tag"].(string); if strings.HasPrefix(tag, exitPoolOutboundPrefix) && !usedTags[tag] { continue } }; kept = append(kept, item) }
+	raw, err := s.SettingService.GetXrayConfigTemplate()
+	if err != nil {
+		return err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return err
+	}
+	routing, _ := cfg["routing"].(map[string]any)
+	if routing == nil {
+		routing = map[string]any{}
+	}
+	rules, _ := routing["rules"].([]any)
+	cleaned := make([]any, 0, len(rules))
+	usedTags := map[string]bool{}
+	for _, item := range rules {
+		m, ok := item.(map[string]any)
+		remove := false
+		if ok && isManagedExitPoolRule(m) {
+			for _, user := range stringSlice(m["user"]) {
+				if emails[user] {
+					remove = true
+					break
+				}
+			}
+		}
+		if !remove {
+			cleaned = append(cleaned, item)
+			if ok {
+				if tag, _ := m["outboundTag"].(string); strings.HasPrefix(tag, exitPoolOutboundPrefix) {
+					usedTags[tag] = true
+				}
+			}
+		}
+	}
+	routing["rules"] = cleaned
+	cfg["routing"] = routing
+	outbounds, _ := cfg["outbounds"].([]any)
+	kept := make([]any, 0, len(outbounds))
+	for _, item := range outbounds {
+		m, ok := item.(map[string]any)
+		if ok {
+			tag, _ := m["tag"].(string)
+			if strings.HasPrefix(tag, exitPoolOutboundPrefix) && !usedTags[tag] {
+				continue
+			}
+		}
+		kept = append(kept, item)
+	}
 	cfg["outbounds"] = kept
-	blob, err := json.Marshal(cfg); if err != nil { return err }
-	if err := s.XraySettingService.SaveXraySetting(string(blob)); err != nil { return err }
-	if s.XrayService.IsXrayRunning() { return s.XrayService.RestartXray(false) }
+	blob, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	if err := s.XraySettingService.SaveXraySetting(string(blob)); err != nil {
+		return err
+	}
+	if s.XrayService.IsXrayRunning() {
+		return s.XrayService.RestartXray(false)
+	}
 	return nil
 }
 
