@@ -1,44 +1,56 @@
-# Multi-country exit pool
+# Multi-country exit subscription groups
 
-The multi-country exit pool is an optional integration with
+This optional integration combines 3x-ui with
 [`hanhaoops/xnvgatebox`](https://github.com/hanhaoops/xnvgatebox). It is disabled
-by default and does not change existing inbounds, outbounds, routing rules, or
-firewall rules until the administrator installs it and explicitly creates a
-route binding.
+by default. Existing clients and routes remain unchanged until an administrator
+creates an exit-pool subscription group.
 
-## Install
+## Install the exit engine
 
-Update 3x-ui to the latest development release, then run as root:
+Run as root on a Linux x86_64 VPS:
 
 ```bash
 x-ui exit-pool install
 ```
 
-The command downloads the pinned `xnvgatebox` release installer over HTTPS.
-The upstream installer verifies its release package and checksum before
-installation. Linux x86_64, systemd, TUN and network namespace support are
-required. Containerized 3x-ui installations are not supported by this helper.
+The installer pins a reviewed xnvgatebox release and verifies the downloaded
+package. Systemd, TUN and network namespaces are required. Docker deployments
+are not supported by this helper.
 
-Open the exit-pool console:
+Use `x-ui exit-pool access` only when you need to change candidate countries,
+the number of exits, probe settings, or third-party SOCKS resources. Day-to-day
+node assignment is performed in the 3x-ui panel.
 
-```bash
-x-ui exit-pool access
-```
+## Create one subscription containing several regions
 
-Use that console to refresh VPN Gate candidates, select a country, choose the
-number of exits and probe concurrency, and manage VPS-direct or third-party
-SOCKS5 exits. Wait until an exit reports ready before binding it in 3x-ui.
+1. In xnvgatebox, select the required countries and wait until their exits show
+   `up`.
+2. Open **Xray configuration → Multi-country exit pool** in 3x-ui.
+3. Choose one existing local VLESS, VMess or Trojan inbound as the mother node.
+4. Select several ready regional exits, enter a group name, and click **Create**.
+5. Open the 3x-ui **Clients** page, search for the displayed subscription ID,
+   and copy its subscription URL.
 
-## Bind an inbound
+3x-ui creates one dedicated client identity per selected region inside the same
+inbound. Those identities share one `subId`, so one subscription contains
+separate US, JP, SG, or other regional entries while they all use the mother
+node's existing public address and port. Xray routes each identity to its own
+local xnvgatebox SOCKS exit. No extra inbound or public port is created.
 
-Open **Xray configuration → Multi-country exit pool**. Ready exits registered
-by the sidecar appear with a `fanout-` tag. Select one inbound and one exit,
-create the binding, then use the page-level **Save** button.
+Use **Edit regions** to add or remove countries from an existing group. Deleting
+a group removes only its generated clients, routing rules and unused managed
+outbounds.
 
-Only that inbound is affected. The generated rule is restricted to TCP because
-the upstream public exit path does not currently guarantee UDP, QUIC, IPv6,
-Hysteria2 or TUIC forwarding. The sidecar's kill switch blocks a failed tunnel
-instead of silently falling back to the VPS public IP.
+## Network behavior
+
+The public VPN Gate path is TCP-only. Managed rules capture both TCP and UDP for
+their generated identities: TCP is forwarded through the selected exit, while
+unsupported UDP fails at that exit instead of silently falling back to the VPS
+public IP. Hysteria2, TUIC, QUIC and IPv6 are therefore not supported by these
+groups.
+
+The integration reads xnvgatebox only through its authenticated loopback API.
+SOCKS credentials are never returned to the browser.
 
 ## Operations
 
@@ -49,22 +61,11 @@ x-ui exit-pool update
 x-ui exit-pool uninstall
 ```
 
-The panel integration is currently published through this fork's `dev-latest`
-release channel, the same channel used by `x-ui update-dev`.
+Delete exit-pool subscription groups in the panel before uninstalling the exit
+engine. VPN Gate exits are operated by third parties, can disappear without
+notice, and should not be trusted with sensitive unencrypted traffic.
 
-Before uninstalling, remove exit-pool bindings in the panel and save the Xray
-configuration. The integration only manages `fanout-*` outbounds and rules; it
-does not modify unrelated user entries.
-
-## Trust and licensing
-
-VPN Gate exits are operated by third parties. They can disappear without
-notice and should not be trusted with sensitive traffic. Country labels are
-candidate hints; the sidecar verifies the connected public exit before marking
-an exit ready.
-
-`xnvgatebox` is distributed under GPL-3.0-only. This repository does not embed
-its binary or source archive; the optional installer obtains a pinned upstream
-release. Copyright, license and third-party notices remain with the upstream
-project.
+`xnvgatebox` is GPL-3.0-only and remains a separately distributed component.
+The helper downloads its pinned upstream release rather than embedding the
+binary in 3x-ui.
 
