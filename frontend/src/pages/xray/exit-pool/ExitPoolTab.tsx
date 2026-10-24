@@ -92,7 +92,10 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
   }, [messageApi]);
 
   useEffect(() => {
-    void refresh();
+    const timer = window.setTimeout(() => {
+      void refresh();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [refresh]);
 
   const readyExits = useMemo(
@@ -322,4 +325,3 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
     </Space>
   );
 }
-
