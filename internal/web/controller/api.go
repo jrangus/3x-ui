@@ -207,6 +207,7 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 	// /panel/api/xray/*.
 	a.settingController = NewSettingController(api)
 	a.xraySettingController = NewXraySettingController(api)
+	NewExitPoolController(api)
 
 	// Subscription balancers — client-side balancers for the JSON sub output
 	NewSubBalancerController(api)
@@ -219,3 +220,4 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 func (a *APIController) BackuptoTgbot(c *gin.Context) {
 	a.Tgbot.SendBackupToAdmins()
 }
+
