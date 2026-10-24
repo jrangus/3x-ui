@@ -629,4 +629,3 @@ func (s *ExitPoolService) Delete(subID string) error {
 	}
 	return nil
 }
-

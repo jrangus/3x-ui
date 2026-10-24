@@ -120,4 +120,3 @@ func (p ClientCreatePayload) MarshalJSON() ([]byte, error) {
 		Traffic:    p.Traffic,
 	})
 }
-

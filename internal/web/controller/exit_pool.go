@@ -52,4 +52,3 @@ func (a *ExitPoolController) delete(c *gin.Context) {
 func websocketNotifyXrayAndClients() {
 	notifyClientsChanged()
 }
-

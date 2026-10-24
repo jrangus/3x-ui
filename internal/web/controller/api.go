@@ -220,4 +220,3 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 func (a *APIController) BackuptoTgbot(c *gin.Context) {
 	a.Tgbot.SendBackupToAdmins()
 }
-

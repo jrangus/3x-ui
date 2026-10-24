@@ -84,4 +84,3 @@ func TestCreateAllowsSharedSubIDOnlyForInternalCaller(t *testing.T) {
 		t.Fatal("ordinary Create unexpectedly reused a shared subId")
 	}
 }
-
