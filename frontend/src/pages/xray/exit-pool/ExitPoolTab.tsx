@@ -97,6 +97,15 @@ export default function ExitPoolTab({
           在 VPS 的 root 终端执行安装命令。安装后用 access
           命令打开出口池控制台，在那里选择国家、出口数量、检测并发、本机直出或第三方 SOCKS5。
         </Typography.Paragraph>
+        <Typography.Paragraph>
+          <Typography.Link
+            href="https://github.com/jrangus/3x-ui/blob/main/docs/exit-pool.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            查看完整部署与安全说明
+          </Typography.Link>
+        </Typography.Paragraph>
         <Space direction="vertical" style={{ width: '100%' }}>
           <Typography.Text code copyable>
             x-ui exit-pool install
@@ -196,3 +205,4 @@ export default function ExitPoolTab({
     </Space>
   );
 }
+
