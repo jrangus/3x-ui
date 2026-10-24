@@ -49,6 +49,9 @@ x-ui exit-pool update
 x-ui exit-pool uninstall
 ```
 
+The panel integration is currently published through this fork's `dev-latest`
+release channel, the same channel used by `x-ui update-dev`.
+
 Before uninstalling, remove exit-pool bindings in the panel and save the Xray
 configuration. The integration only manages `fanout-*` outbounds and rules; it
 does not modify unrelated user entries.
@@ -64,3 +67,4 @@ an exit ready.
 its binary or source archive; the optional installer obtains a pinned upstream
 release. Copyright, license and third-party notices remain with the upstream
 project.
+
