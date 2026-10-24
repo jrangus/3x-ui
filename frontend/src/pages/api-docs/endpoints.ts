@@ -2077,6 +2077,42 @@ export const sections: readonly Section[] = [
   },
 
   {
+    id: 'exit-pool',
+    title: 'Multi-country Exit Pool',
+    description:
+      'Create and maintain subscription groups whose client identities share one local VLESS, VMess, or Trojan inbound while routing through different xnvgatebox exits.',
+    endpoints: [
+      {
+        method: 'GET',
+        path: '/panel/api/exit-pool',
+        summary:
+          'Return installation state, ready regional exits, compatible local inbounds, and existing managed subscription groups.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/exit-pool/sync',
+        summary:
+          'Create a multi-region subscription group or synchronize the selected exits of an existing group.',
+        body: '{\n  "inboundId": 1,\n  "slots": [1, 2, 3],\n  "name": "Multi-region",\n  "subId": "pool-example"\n}',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/exit-pool/delete/:subId',
+        summary:
+          'Delete a managed subscription group together with its generated clients, routing rules, and unused managed outbounds.',
+        params: [
+          {
+            name: 'subId',
+            in: 'path',
+            type: 'string',
+            desc: 'Managed exit-pool subscription ID.',
+          },
+        ],
+      },
+    ],
+  },
+
+  {
     id: 'xray-settings',
     title: 'Xray Settings',
     description:
