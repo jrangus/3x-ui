@@ -412,7 +412,7 @@ check_config() {
         dsn="$(grep -E '^XUI_DB_DSN=' "$db_env_file" | head -1 | cut -d= -f2-)"
         local dsn_safe
         dsn_safe="$(echo "$dsn" | sed -E 's|(://[^:/@]+:)[^@]+@|\1****@|')"
-        echo -e "${green}Database: PostgreSQL 鈥?${dsn_safe}${plain}"
+        echo -e "${green}Database: PostgreSQL — ${dsn_safe}${plain}"
     else
         echo -e "${green}Database: SQLite (/etc/x-ui/x-ui.db)${plain}"
     fi
@@ -474,7 +474,7 @@ check_config() {
             echo -e "${yellow}The certificate also covers:${plain} $(echo "$cert_sans" | grep -vx "$domain" | tr '\n' ' ')"
         fi
     else
-        echo -e "${red}鈿?WARNING: No SSL certificate configured!${plain}"
+        echo -e "${red}⚠ WARNING: No SSL certificate configured!${plain}"
         echo -e "${yellow}You can get a Let's Encrypt certificate for your IP address (valid ~6 days, auto-renews).${plain}"
         read -rp "Generate SSL certificate for IP now? [y/N]: " gen_ssl
         if [[ "$gen_ssl" == "y" || "$gen_ssl" == "Y" ]]; then
@@ -997,7 +997,7 @@ disable_bbr() {
             old_cc="${old_settings#*:}"
         fi
         # sysctl -w already restores the live values, so no `sysctl --system`
-        # afterwards 鈥?it would re-apply every sysctl file on the host and
+        # afterwards — it would re-apply every sysctl file on the host and
         # surface unrelated errors from the distro's own defaults (see issue #5160)
         [[ -n "${old_qdisc}" ]] && sysctl -w net.core.default_qdisc="${old_qdisc}"
         [[ -n "${old_cc}" ]] && sysctl -w net.ipv4.tcp_congestion_control="${old_cc}"
@@ -1674,7 +1674,7 @@ ssl_cert_issue_main() {
                 done
             fi
             # The panel's configured certificate may live outside /root/cert
-            # (e.g. certbot under /etc/letsencrypt) 鈥?show it too (#5070).
+            # (e.g. certbot under /etc/letsencrypt) — show it too (#5070).
             local panel_cert=$(${xui_folder}/x-ui setting -getCert true | grep 'cert:' | awk -F': ' '{print $2}' | tr -d '[:space:]')
             if [[ -n "${panel_cert}" && "${panel_cert}" != /root/cert/* ]]; then
                 echo -e "Panel certificate (custom path): ${panel_cert}"
@@ -3783,13 +3783,75 @@ ${green}Multi-country Exit Pool${plain}
 }
 
 show_usage() {
-    echo -e "鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${blue}x-ui control menu usages (subcommands):${plain}                       鈹?鈹?                                                               鈹?鈹? ${blue}x-ui${plain}                       - Admin Management Script          鈹?鈹? ${blue}x-ui start${plain}                 - Start                            鈹?鈹? ${blue}x-ui stop${plain}                  - Stop                             鈹?鈹? ${blue}x-ui restart${plain}               - Restart                          鈹?|  ${blue}x-ui restart-xray${plain}          - Restart Xray                     鈹?鈹? ${blue}x-ui status${plain}                - Current Status                   鈹?鈹? ${blue}x-ui settings${plain}              - Current Settings                 鈹?鈹? ${blue}x-ui enable${plain}                - Enable Autostart on OS Startup   鈹?鈹? ${blue}x-ui disable${plain}               - Disable Autostart on OS Startup  鈹?鈹? ${blue}x-ui log${plain}                   - Check logs                       鈹?鈹? ${blue}x-ui banlog${plain}                - Check Fail2ban ban logs          鈹?鈹? ${blue}x-ui update${plain}                - Update                           鈹?鈹? ${blue}x-ui update-dev${plain}            - Update to Dev channel (latest)   鈹?鈹? ${blue}x-ui update-all-geofiles${plain}   - Update all geo files             鈹?鈹? ${blue}x-ui migrateDB [file]${plain}      - Convert .db <-> .dump (SQLite)   鈹?鈹? ${blue}x-ui pgclient [ver]${plain}        - Upgrade pg_dump/pg_restore tools 鈹?鈹? ${blue}x-ui legacy${plain}                - Legacy version                   鈹?鈹? ${blue}x-ui install${plain}               - Install                          鈹?鈹? ${blue}x-ui uninstall${plain}             - Uninstall                        鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
+    echo -e "┌────────────────────────────────────────────────────────────────┐
+│  ${blue}x-ui control menu usages (subcommands):${plain}                       │
+│                                                                │
+│  ${blue}x-ui${plain}                       - Admin Management Script          │
+│  ${blue}x-ui start${plain}                 - Start                            │
+│  ${blue}x-ui stop${plain}                  - Stop                             │
+│  ${blue}x-ui restart${plain}               - Restart                          │
+|  ${blue}x-ui restart-xray${plain}          - Restart Xray                     │
+│  ${blue}x-ui status${plain}                - Current Status                   │
+│  ${blue}x-ui settings${plain}              - Current Settings                 │
+│  ${blue}x-ui enable${plain}                - Enable Autostart on OS Startup   │
+│  ${blue}x-ui disable${plain}               - Disable Autostart on OS Startup  │
+│  ${blue}x-ui log${plain}                   - Check logs                       │
+│  ${blue}x-ui banlog${plain}                - Check Fail2ban ban logs          │
+│  ${blue}x-ui update${plain}                - Update                           │
+│  ${blue}x-ui update-dev${plain}            - Update to Dev channel (latest)   │
+│  ${blue}x-ui update-all-geofiles${plain}   - Update all geo files             │
+│  ${blue}x-ui migrateDB [file]${plain}      - Convert .db <-> .dump (SQLite)   │
+│  ${blue}x-ui pgclient [ver]${plain}        - Upgrade pg_dump/pg_restore tools │
+│  ${blue}x-ui legacy${plain}                - Legacy version                   │
+│  ${blue}x-ui install${plain}               - Install                          │
+│  ${blue}x-ui uninstall${plain}             - Uninstall                        │
+└────────────────────────────────────────────────────────────────┘"
     echo -e "  ${blue}x-ui exit-pool {install|update|access|status|uninstall}${plain}"
 }
 
 show_menu() {
     echo -e "
-鈺斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈺?鈹? ${green}3X-UI Panel Management Script${plain}                鈹?鈹? ${green}0.${plain} Exit Script                               鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}1.${plain} Install                                   鈹?鈹? ${green}2.${plain} Update                                    鈹?鈹? ${green}3.${plain} Update to Dev Channel (latest commit)     鈹?鈹? ${green}4.${plain} Update Menu                               鈹?鈹? ${green}5.${plain} Legacy Version                            鈹?鈹? ${green}6.${plain} Uninstall                                 鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}7.${plain} Reset Username & Password                 鈹?鈹? ${green}8.${plain} Reset Web Base Path                       鈹?鈹? ${green}9.${plain} Reset Settings                            鈹?鈹? ${green}10.${plain} Change Port                              鈹?鈹? ${green}11.${plain} View Current Settings                    鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}12.${plain} Start                                    鈹?鈹? ${green}13.${plain} Stop                                     鈹?鈹? ${green}14.${plain} Restart                                  鈹?|  ${green}15.${plain} Restart Xray                             鈹?鈹? ${green}16.${plain} Check Status                             鈹?鈹? ${green}17.${plain} Logs Management                          鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}18.${plain} Enable Autostart                         鈹?鈹? ${green}19.${plain} Disable Autostart                        鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}20.${plain} SSL Certificate Management               鈹?鈹? ${green}21.${plain} Cloudflare SSL Certificate               鈹?鈹? ${green}22.${plain} IP Limit Management                      鈹?鈹? ${green}23.${plain} Firewall Management                      鈹?鈹? ${green}24.${plain} SSH Port Forwarding Management           鈹?鈹? ${green}25.${plain} PostgreSQL Management                    鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}26.${plain} BBR / BBRv3 Management                  鈹?鈹? ${green}27.${plain} Update Geo Files                         鈹?鈹? ${green}28.${plain} Speedtest by Ookla                       鈹?鈹? ${green}29.${plain} Network Privacy & DNS Guard               鈹?鈹? ${green}30.${plain} Multi-country Exit Pool                   鈹?鈺氣攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈺?"
+╔────────────────────────────────────────────────╗
+│  ${green}3X-UI Panel Management Script${plain}                │
+│  ${green}0.${plain} Exit Script                               │
+│────────────────────────────────────────────────│
+│  ${green}1.${plain} Install                                   │
+│  ${green}2.${plain} Update                                    │
+│  ${green}3.${plain} Update to Dev Channel (latest commit)     │
+│  ${green}4.${plain} Update Menu                               │
+│  ${green}5.${plain} Legacy Version                            │
+│  ${green}6.${plain} Uninstall                                 │
+│────────────────────────────────────────────────│
+│  ${green}7.${plain} Reset Username & Password                 │
+│  ${green}8.${plain} Reset Web Base Path                       │
+│  ${green}9.${plain} Reset Settings                            │
+│  ${green}10.${plain} Change Port                              │
+│  ${green}11.${plain} View Current Settings                    │
+│────────────────────────────────────────────────│
+│  ${green}12.${plain} Start                                    │
+│  ${green}13.${plain} Stop                                     │
+│  ${green}14.${plain} Restart                                  │
+|  ${green}15.${plain} Restart Xray                             │
+│  ${green}16.${plain} Check Status                             │
+│  ${green}17.${plain} Logs Management                          │
+│────────────────────────────────────────────────│
+│  ${green}18.${plain} Enable Autostart                         │
+│  ${green}19.${plain} Disable Autostart                        │
+│────────────────────────────────────────────────│
+│  ${green}20.${plain} SSL Certificate Management               │
+│  ${green}21.${plain} Cloudflare SSL Certificate               │
+│  ${green}22.${plain} IP Limit Management                      │
+│  ${green}23.${plain} Firewall Management                      │
+│  ${green}24.${plain} SSH Port Forwarding Management           │
+│  ${green}25.${plain} PostgreSQL Management                    │
+│────────────────────────────────────────────────│
+│  ${green}26.${plain} BBR / BBRv3 Management                  │
+│  ${green}27.${plain} Update Geo Files                         │
+│  ${green}28.${plain} Speedtest by Ookla                       │
+│  ${green}29.${plain} Network Privacy & DNS Guard               │
+│  ${green}30.${plain} Multi-country Exit Pool                   │
+╚────────────────────────────────────────────────╝
+"
     show_status
     echo && read -rp "Please enter your selection [0-30]: " num
 
@@ -3972,4 +4034,3 @@ if [[ $# > 0 ]]; then
 else
     show_menu
 fi
-
