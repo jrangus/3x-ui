@@ -36,10 +36,11 @@ import {
   detectBalancerCycles,
 } from './balancers/balancer-loopback';
 import { DnsTab } from './dns';
+import { ExitPoolTab } from './exit-pool';
 import { WarpModal, NordModal, PiaModal } from './overrides';
 import './XrayPage.css';
 
-const SECTION_SLUGS = ['basic', 'routing', 'outbound', 'balancer', 'dns', 'advanced'];
+const SECTION_SLUGS = ['basic', 'routing', 'outbound', 'balancer', 'dns', 'exit-pool', 'advanced'];
 
 type AdvKey = 'xraySetting' | 'inboundSettings' | 'outboundSettings' | 'routingRuleSettings';
 
@@ -269,6 +270,14 @@ export default function XrayPage() {
       case 'dns':
         return (
           <DnsTab templateSettings={templateSettings} setTemplateSettings={setTemplateSettings} />
+        );
+      case 'exit-pool':
+        return (
+          <ExitPoolTab
+            templateSettings={templateSettings}
+            setTemplateSettings={setTemplateSettings}
+            inboundTags={inboundTags}
+          />
         );
       case 'advanced':
         return (

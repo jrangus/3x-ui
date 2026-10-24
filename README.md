@@ -100,6 +100,10 @@ artifacts without this fork's BBR and DNS/privacy changes. See
 
 Every release asset is published with a `.sha256` sum next to it. Both `install.sh` and the updater verify the archive against that sum and abort on a mismatch.
 
+An optional, isolated multi-country exit pool can be installed after the panel
+is running. It does not affect existing nodes until an administrator explicitly
+binds an inbound to a managed exit. See [Multi-country exit pool](docs/exit-pool.md).
+
 For full documentation — installation, configuration, operations, and the complete API reference — visit **[docs.sanaei.dev](https://docs.sanaei.dev)**.
 
 ### Unattended install
