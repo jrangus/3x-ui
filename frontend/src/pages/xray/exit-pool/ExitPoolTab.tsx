@@ -102,14 +102,19 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
   const sortedExits = useMemo(() => {
     const rows = [...(state?.exits || [])];
     rows.sort((left, right) => {
+      const statusOrder = Number(right.status === 'up') - Number(left.status === 'up');
+      if (statusOrder !== 0) return statusOrder;
       if (exitSort === 'latency') {
         const a = left.latencyMs && left.latencyMs > 0 ? left.latencyMs : Number.MAX_VALUE;
         const b = right.latencyMs && right.latencyMs > 0 ? right.latencyMs : Number.MAX_VALUE;
         return a - b || left.slot - right.slot;
       }
-      const a = left.country || left.region || '';
-      const b = right.country || right.region || '';
-      return a.localeCompare(b, undefined, { sensitivity: 'base' }) || left.slot - right.slot;
+      const a = `${left.country || ''} ${left.region || ''}`.trim();
+      const b = `${right.country || ''} ${right.region || ''}`.trim();
+      return (
+        a.localeCompare(b, 'zh-CN', { numeric: true, sensitivity: 'base' }) ||
+        left.slot - right.slot
+      );
     });
     return rows;
   }, [exitSort, state?.exits]);
@@ -199,22 +204,25 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
         size="small"
         title={subId ? `编辑订阅组：${name}` : '创建多地区订阅组'}
         extra={
-          <Space>
-            <Select
-              value={exitSort}
-              onChange={setExitSort}
-              options={[
-                { value: 'region', label: '按地区排序' },
-                { value: 'latency', label: '按延迟排序' },
-              ]}
-              style={{ width: 130 }}
-            />
-            <Button loading={loading} onClick={() => void refresh()}>
-              刷新出口
-            </Button>
-          </Space>
+          <Button loading={loading} onClick={() => void refresh()}>
+            刷新出口
+          </Button>
         }
       >
+        <Space wrap style={{ marginBottom: 12 }}>
+          <Typography.Text strong>出口排列方式：</Typography.Text>
+          <Select
+            aria-label="出口排列方式"
+            value={exitSort}
+            onChange={setExitSort}
+            options={[
+              { value: 'region', label: '按地区名称排序' },
+              { value: 'latency', label: '按延迟从低到高排序' },
+            ]}
+            style={{ width: 210 }}
+          />
+          <Typography.Text type="secondary">此设置同时控制下方选择框和可用出口列表</Typography.Text>
+        </Space>
         <Row gutter={[12, 12]}>
           <Col xs={24} lg={7}>
             <Select
@@ -269,7 +277,22 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
         )}
       </Card>
 
-      <Card size="small" title="可用出口">
+      <Card
+        size="small"
+        title={`可用出口 · ${exitSort === 'region' ? '按地区名称' : '按延迟从低到高'}`}
+        extra={
+          <Select
+            aria-label="可用出口排序"
+            value={exitSort}
+            onChange={setExitSort}
+            options={[
+              { value: 'region', label: '地区排序' },
+              { value: 'latency', label: '延迟排序' },
+            ]}
+            style={{ width: 120 }}
+          />
+        }
+      >
         <Table
           rowKey="slot"
           size="small"
@@ -352,3 +375,4 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
     </Space>
   );
 }
+

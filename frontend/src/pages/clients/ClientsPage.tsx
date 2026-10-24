@@ -18,6 +18,7 @@ import {
   Result,
   Row,
   Select,
+  Space,
   Spin,
   Statistic,
   Switch,
@@ -2085,3 +2086,4 @@ function bucketChipLabel(b: string, t: (k: string) => string): string {
       return b;
   }
 }
+
