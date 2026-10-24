@@ -1,8 +1,8 @@
 package controller
 
 import (
-	"github.com/mhsanaei/3x-ui/v3/internal/session"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 
 	"github.com/gin-gonic/gin"
 )
