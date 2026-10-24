@@ -1,207 +1,125 @@
-import { useMemo, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Card,
-  Col,
-  Divider,
-  Row,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Card, Col, Input, Popconfirm, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 
 import type { SetTemplate, XraySettingsValue } from '@/hooks/useXraySetting';
+import { HttpUtil } from '@/utils';
 
-import {
-  EXIT_POOL_TAG_PREFIX,
-  bindExitPoolRoute,
-  listExitPoolBindings,
-  unbindExitPoolRoute,
-} from './exit-pool-routing';
+interface ExitPoolTabProps { templateSettings: XraySettingsValue | null; setTemplateSettings: SetTemplate; inboundTags: string[]; }
+interface ExitRow { slot: number; port: number; host: string; region: string; country: string; exitIp: string; status: string; latencyMs?: number; }
+interface InboundRow { id: number; tag: string; remark: string; port: number; protocol: string; }
+interface MemberRow { slot: number; region: string; country: string; exitIp: string; email: string; }
+interface GroupRow { subId: string; name: string; inboundId: number; inboundTag: string; members: MemberRow[]; memberCount: number; }
+interface PoolState { installed: boolean; error?: string; exits: ExitRow[]; inbounds: InboundRow[]; groups: GroupRow[]; }
 
-interface ExitPoolTabProps {
-  templateSettings: XraySettingsValue | null;
-  setTemplateSettings: SetTemplate;
-  inboundTags: string[];
-}
+const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } } as const;
 
-interface ExitPoolOutbound {
-  tag: string;
-  address: string;
-  port: number | null;
-}
+export default function ExitPoolTab(_: ExitPoolTabProps) {
+  const [messageApi, contextHolder] = message.useMessage();
+  const [state, setState] = useState<PoolState | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [inboundId, setInboundId] = useState<number>();
+  const [slots, setSlots] = useState<number[]>([]);
+  const [name, setName] = useState('Multi-region');
+  const [subId, setSubId] = useState('');
 
-function exitPoolOutbounds(template: XraySettingsValue | null): ExitPoolOutbound[] {
-  const rows: ExitPoolOutbound[] = [];
-  for (const outbound of template?.outbounds || []) {
-    if (!outbound || typeof outbound !== 'object') continue;
-    const outboundRecord = outbound as unknown as Record<string, unknown>;
-    const tag = typeof outboundRecord.tag === 'string' ? outboundRecord.tag : '';
-    if (!tag.startsWith(EXIT_POOL_TAG_PREFIX)) continue;
-    const settings = outboundRecord.settings as Record<string, unknown> | undefined;
-    const servers = Array.isArray(settings?.servers) ? settings.servers : [];
-    const server = (servers[0] || {}) as Record<string, unknown>;
-    rows.push({
-      tag,
-      address: typeof server.address === 'string' ? server.address : '127.0.0.1',
-      port: typeof server.port === 'number' ? server.port : null,
-    });
-  }
-  return rows;
-}
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await HttpUtil.get<PoolState>('/panel/api/exit-pool', undefined, { silent: true });
+      if (!response.success || !response.obj) {
+        messageApi.error(response.msg || 'Failed to read the exit pool');
+        return;
+      }
+      setState(response.obj);
+    } finally {
+      setLoading(false);
+    }
+  }, [messageApi]);
 
-export default function ExitPoolTab({
-  templateSettings,
-  setTemplateSettings,
-  inboundTags,
-}: ExitPoolTabProps) {
-  const [messageApi, messageContextHolder] = message.useMessage();
-  const [inboundTag, setInboundTag] = useState('');
-  const [outboundTag, setOutboundTag] = useState('');
-  const outbounds = useMemo(() => exitPoolOutbounds(templateSettings), [templateSettings]);
-  const bindings = useMemo(
-    () => (templateSettings ? listExitPoolBindings(templateSettings) : []),
-    [templateSettings],
-  );
+  useEffect(() => { void refresh(); }, [refresh]);
 
-  function bind() {
-    if (!templateSettings || !inboundTag || !outboundTag) {
-      messageApi.warning('请选择入站和出口');
+  const readyExits = useMemo(() => (state?.exits || []).filter((exit) => exit.status === 'up'), [state?.exits]);
+
+  async function syncGroup() {
+    if (!inboundId || slots.length === 0 || !name.trim()) {
+      messageApi.warning('请选择母节点、至少一个可用地区出口，并填写订阅组名称');
       return;
     }
-    setTemplateSettings(bindExitPoolRoute(templateSettings, inboundTag, outboundTag));
-    messageApi.success('绑定已加入配置，请点击页面顶部“保存”使其生效');
+    setSaving(true);
+    try {
+      const response = await HttpUtil.post<GroupRow>('/panel/api/exit-pool/sync', { inboundId, slots, name: name.trim(), subId }, { ...JSON_HEADERS, silent: true });
+      if (!response.success) {
+        messageApi.error(response.msg || '创建订阅组失败');
+        return;
+      }
+      messageApi.success(subId ? '订阅组已同步' : '多地区订阅组已创建');
+      setSubId('');
+      setSlots([]);
+      await refresh();
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function unbind(tag: string) {
-    if (!templateSettings) return;
-    setTemplateSettings(unbindExitPoolRoute(templateSettings, tag));
-    messageApi.success('绑定已移除，请点击页面顶部“保存”使其生效');
+  function editGroup(group: GroupRow) {
+    setSubId(group.subId);
+    setName(group.name);
+    setInboundId(group.inboundId);
+    setSlots(group.members.map((member) => member.slot));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function deleteGroup(group: GroupRow) {
+    const response = await HttpUtil.post(`/panel/api/exit-pool/delete/${encodeURIComponent(group.subId)}`, undefined, { silent: true });
+    if (!response.success) {
+      messageApi.error(response.msg || '删除订阅组失败');
+      return;
+    }
+    messageApi.success('订阅组及其专用地区客户端已删除');
+    if (subId === group.subId) { setSubId(''); setSlots([]); }
+    await refresh();
   }
 
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      {messageContextHolder}
-      <Alert
-        showIcon
-        type="info"
-        title="多国出口池是可选功能"
-        description="出口池未安装、未启动或未绑定路由时，不会改变现有节点。出口由独立服务建立 OpenVPN 隧道并检测真实 IP；3x-ui 只管理 fanout-* 出站和显式路由绑定。"
-      />
+      {contextHolder}
+      <Alert showIcon type="info" title="一个母节点，一个订阅，多地区出口" description="系统会在选中的 VLESS、VMess 或 Trojan 入站内为每个地区生成独立身份，并按身份路由到对应出口。所有身份共用同一个 subId，因此客户端导入一次订阅后即可选择不同地区；不会复制入站、不会增加公网端口。出口池仅承载 TCP，UDP 会在该出口失败关闭，不会回落到 VPS 直连。" />
+      {!state?.installed && <Alert showIcon type="warning" title="出口池尚未安装" description={<Typography.Text code copyable>x-ui exit-pool install</Typography.Text>} />}
+      {state?.error && <Alert showIcon type="error" title="出口池暂不可用" description={state.error} />}
 
-      <Card size="small" title="一键安装与管理">
-        <Typography.Paragraph>
-          在 VPS 的 root 终端执行安装命令。安装后用 access
-          命令打开出口池控制台，在那里选择国家、出口数量、检测并发、本机直出或第三方 SOCKS5。
-        </Typography.Paragraph>
-        <Typography.Paragraph>
-          <Typography.Link
-            href="https://github.com/jrangus/3x-ui/blob/main/docs/exit-pool.md"
-            target="_blank"
-            rel="noreferrer"
-          >
-            查看完整部署与安全说明
-          </Typography.Link>
-        </Typography.Paragraph>
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Typography.Text code copyable>
-            x-ui exit-pool install
-          </Typography.Text>
-          <Typography.Text code copyable>
-            x-ui exit-pool access
-          </Typography.Text>
-          <Typography.Text code copyable>
-            x-ui exit-pool update
-          </Typography.Text>
-          <Typography.Text code copyable>
-            x-ui exit-pool status
-          </Typography.Text>
-        </Space>
-      </Card>
-
-      <Card size="small" title="已发现的出口">
-        {outbounds.length === 0 ? (
-          <Alert
-            showIcon
-            type="warning"
-            title="尚未发现 fanout-* 出站"
-            description="先安装并打开出口池控制台，创建出口并等待状态变为可用，然后刷新本页面。"
-          />
-        ) : (
-          <Table
-            size="small"
-            pagination={false}
-            rowKey="tag"
-            dataSource={outbounds}
-            columns={[
-              { title: '出站标签', dataIndex: 'tag' },
-              { title: '本地 SOCKS 地址', render: (_, row) => `${row.address}:${row.port ?? '-'}` },
-              { title: '状态', render: () => <Tag color="green">已注册</Tag> },
-            ]}
-          />
-        )}
-      </Card>
-
-      <Card size="small" title="绑定入站到出口">
-        <Alert
-          showIcon
-          type="warning"
-          title="第一版仅绑定 TCP"
-          description="VPN Gate 公共出口当前不能保证 UDP、QUIC、Hysteria2 或 IPv6。绑定规则明确限制为 TCP，避免 UDP 静默从 VPS 本机直出。"
-          style={{ marginBottom: 16 }}
-        />
+      <Card size="small" title={subId ? `编辑订阅组：${name}` : '创建多地区订阅组'} extra={<Button loading={loading} onClick={() => void refresh()}>刷新出口</Button>}>
         <Row gutter={[12, 12]}>
-          <Col xs={24} md={9}>
-            <Select
-              showSearch
-              value={inboundTag || undefined}
-              placeholder="选择要使用出口池的入站"
-              options={inboundTags.map((tag) => ({ label: tag, value: tag }))}
-              onChange={setInboundTag}
-              style={{ width: '100%' }}
-            />
+          <Col xs={24} lg={7}>
+            <Select value={inboundId} placeholder="选择一个现有节点作为母节点" options={(state?.inbounds || []).map((inbound) => ({ value: inbound.id, label: `${inbound.remark || inbound.tag} · ${inbound.protocol.toUpperCase()} :${inbound.port}` }))} onChange={setInboundId} disabled={Boolean(subId)} style={{ width: '100%' }} />
           </Col>
-          <Col xs={24} md={9}>
-            <Select
-              showSearch
-              value={outboundTag || undefined}
-              placeholder="选择 fanout 出站"
-              options={outbounds.map((outbound) => ({ label: outbound.tag, value: outbound.tag }))}
-              onChange={setOutboundTag}
-              style={{ width: '100%' }}
-            />
+          <Col xs={24} lg={6}><Input value={name} maxLength={64} onChange={(event) => setName(event.target.value)} placeholder="订阅组名称" /></Col>
+          <Col xs={24} lg={8}>
+            <Select mode="multiple" value={slots} placeholder="选择多个国家或地区出口" options={readyExits.map((exit) => ({ value: exit.slot, label: `${exit.country || exit.region || 'Unknown'} · ${exit.exitIp || exit.host} · ${Math.round(exit.latencyMs || 0)}ms` }))} onChange={setSlots} style={{ width: '100%' }} />
           </Col>
-          <Col xs={24} md={6}>
-            <Button type="primary" block onClick={bind}>
-              创建绑定规则
-            </Button>
-          </Col>
+          <Col xs={24} lg={3}><Button type="primary" block loading={saving} onClick={() => void syncGroup()}>{subId ? '同步' : '创建'}</Button></Col>
         </Row>
+        {subId && <Button style={{ marginTop: 12 }} onClick={() => { setSubId(''); setSlots([]); }}>取消编辑</Button>}
+      </Card>
 
-        <Divider />
-        <Table
-          size="small"
-          pagination={false}
-          rowKey={(row) => `${row.inboundTag}:${row.outboundTag}`}
-          dataSource={bindings}
-          locale={{ emptyText: '尚未创建出口池绑定' }}
-          columns={[
-            { title: '入站', dataIndex: 'inboundTag' },
-            { title: '出口', dataIndex: 'outboundTag' },
-            {
-              title: '操作',
-              render: (_, row) => (
-                <Button danger size="small" onClick={() => unbind(row.inboundTag)}>
-                  解绑
-                </Button>
-              ),
-            },
-          ]}
-        />
+      <Card size="small" title="可用出口">
+        <Table rowKey="slot" size="small" loading={loading} pagination={false} dataSource={state?.exits || []} columns={[
+          { title: '地区', render: (_, row: ExitRow) => row.country || row.region || '-' },
+          { title: '出口 IP', dataIndex: 'exitIp' },
+          { title: '延迟', render: (_, row: ExitRow) => row.latencyMs ? `${Math.round(row.latencyMs)} ms` : '-' },
+          { title: '状态', render: (_, row: ExitRow) => <Tag color={row.status === 'up' ? 'green' : 'orange'}>{row.status}</Tag> },
+        ]} />
+      </Card>
+
+      <Card size="small" title="多地区订阅组">
+        <Table rowKey="subId" size="small" pagination={false} dataSource={state?.groups || []} locale={{ emptyText: '尚未创建多地区订阅组' }} columns={[
+          { title: '名称', dataIndex: 'name' },
+          { title: '母节点', dataIndex: 'inboundTag' },
+          { title: '地区节点', render: (_, row: GroupRow) => <Space wrap>{row.members.map((member) => <Tag key={member.slot}>{member.country || member.region || `Slot ${member.slot}`}</Tag>)}</Space> },
+          { title: '订阅 ID', render: (_, row: GroupRow) => <Typography.Text code copyable>{row.subId}</Typography.Text> },
+          { title: '操作', render: (_, row: GroupRow) => <Space><Button size="small" onClick={() => editGroup(row)}>编辑地区</Button><Popconfirm title="删除该订阅组及自动生成的地区客户端？" onConfirm={() => void deleteGroup(row)}><Button danger size="small">删除</Button></Popconfirm></Space> },
+        ]} />
+        <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>创建后到“客户端”页面搜索上面的订阅 ID，可直接复制订阅地址。订阅中每个地区是一条独立节点，但都使用同一个服务器端口。</Typography.Paragraph>
       </Card>
     </Space>
   );
