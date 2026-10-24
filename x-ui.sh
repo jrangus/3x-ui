@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 38483)
-Total output lines: 4037
-
 #!/bin/bash
 
 red='\033[0;31m'
@@ -415,7 +412,7 @@ check_config() {
         dsn="$(grep -E '^XUI_DB_DSN=' "$db_env_file" | head -1 | cut -d= -f2-)"
         local dsn_safe
         dsn_safe="$(echo "$dsn" | sed -E 's|(://[^:/@]+:)[^@]+@|\1****@|')"
-        echo -e "${green}Database: PostgreSQL — ${dsn_safe}${plain}"
+        echo -e "${green}Database: PostgreSQL 鈥?${dsn_safe}${plain}"
     else
         echo -e "${green}Database: SQLite (/etc/x-ui/x-ui.db)${plain}"
     fi
@@ -477,7 +474,7 @@ check_config() {
             echo -e "${yellow}The certificate also covers:${plain} $(echo "$cert_sans" | grep -vx "$domain" | tr '\n' ' ')"
         fi
     else
-        echo -e "${red}⚠ WARNING: No SSL certificate configured!${plain}"
+        echo -e "${red}鈿?WARNING: No SSL certificate configured!${plain}"
         echo -e "${yellow}You can get a Let's Encrypt certificate for your IP address (valid ~6 days, auto-renews).${plain}"
         read -rp "Generate SSL certificate for IP now? [y/N]: " gen_ssl
         if [[ "$gen_ssl" == "y" || "$gen_ssl" == "Y" ]]; then
@@ -1000,7 +997,7 @@ disable_bbr() {
             old_cc="${old_settings#*:}"
         fi
         # sysctl -w already restores the live values, so no `sysctl --system`
-        # afterwards — it would re-apply every sysctl file on the host and
+        # afterwards 鈥?it would re-apply every sysctl file on the host and
         # surface unrelated errors from the distro's own defaults (see issue #5160)
         [[ -n "${old_qdisc}" ]] && sysctl -w net.core.default_qdisc="${old_qdisc}"
         [[ -n "${old_cc}" ]] && sysctl -w net.ipv4.tcp_congestion_control="${old_cc}"
@@ -1677,7 +1674,7 @@ ssl_cert_issue_main() {
                 done
             fi
             # The panel's configured certificate may live outside /root/cert
-            # (e.g. certbot under /etc/letsencrypt) — show it too (#5070).
+            # (e.g. certbot under /etc/letsencrypt) 鈥?show it too (#5070).
             local panel_cert=$(${xui_folder}/x-ui setting -getCert true | grep 'cert:' | awk -F': ' '{print $2}' | tr -d '[:space:]')
             if [[ -n "${panel_cert}" && "${panel_cert}" != /root/cert/* ]]; then
                 echo -e "Panel certificate (custom path): ${panel_cert}"
@@ -1705,7 +1702,814 @@ ssl_cert_issue_main() {
                 else
                     echo "Certificate or private key file not found."
                 fi
-          …8483 tokens truncated…minimal server images (Debian 12+, Ubuntu 24+, fresh RHEL-family).
+                ssl_cert_issue_main
+                return
+            fi
+            local domains=$(find /root/cert/ -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2> /dev/null)
+            if [ -z "$domains" ]; then
+                echo "No certificates found."
+            else
+                echo "Available domains:"
+                echo "$domains"
+                read -rp "Please choose a domain to set the panel paths: " domain
+
+                if echo "$domains" | grep -qw "$domain"; then
+                    local webCertFile="/root/cert/${domain}/fullchain.pem"
+                    local webKeyFile="/root/cert/${domain}/privkey.pem"
+
+                    if [[ -f "${webCertFile}" && -f "${webKeyFile}" ]]; then
+                        ${xui_folder}/x-ui cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+                        echo "Panel paths set for domain: $domain"
+                        echo "  - Certificate File: $webCertFile"
+                        echo "  - Private Key File: $webKeyFile"
+                        # Register the acme.sh install-cert hook so auto-renewal copies the
+                        # renewed cert to these paths and reloads the panel. Without it acme.sh
+                        # renews but never updates /root/cert, silently serving a stale cert.
+                        if command -v ~/.acme.sh/acme.sh &> /dev/null && ~/.acme.sh/acme.sh --list 2> /dev/null | awk '{print $1}' | grep -Fxq "${domain}"; then
+                            ~/.acme.sh/acme.sh --installcert --force -d "${domain}" \
+                                --key-file "${webKeyFile}" \
+                                --fullchain-file "${webCertFile}" \
+                                --reloadcmd "x-ui restart" 2>&1 || true
+                            echo "Registered acme.sh auto-renewal hook for ${domain}."
+                        fi
+                        restart
+                    else
+                        echo "Certificate or private key not found for domain: $domain."
+                    fi
+                else
+                    echo "Invalid domain entered."
+                fi
+            fi
+            ssl_cert_issue_main
+            ;;
+        6)
+            echo -e "${yellow}Let's Encrypt SSL Certificate for IP Address${plain}"
+            echo -e "This will obtain a certificate for your server's IP using the shortlived profile."
+            echo -e "${yellow}Certificate valid for ~6 days, auto-renews via acme.sh cron job.${plain}"
+            echo -e "${yellow}Port 80 must be open and accessible from the internet.${plain}"
+            confirm "Do you want to proceed?" "y"
+            if [[ $? == 0 ]]; then
+                ssl_cert_issue_for_ip
+            fi
+            ssl_cert_issue_main
+            ;;
+
+        *)
+            echo -e "${red}Invalid option. Please select a valid number.${plain}\n"
+            ssl_cert_issue_main
+            ;;
+    esac
+}
+
+ssl_cert_issue_for_ip() {
+    LOGI "Starting automatic SSL certificate generation for server IP..."
+    LOGI "Using Let's Encrypt shortlived profile (~6 days validity, auto-renews)"
+
+    local existing_webBasePath=$(${xui_folder}/x-ui setting -show true | grep -Eo 'webBasePath: .+' | awk '{print $2}')
+    local existing_port=$(${xui_folder}/x-ui setting -show true | grep -Eo 'port: .+' | awk '{print $2}')
+
+    # Get server IP
+    local URL_lists=(
+        "https://api4.ipify.org"
+        "https://ipv4.icanhazip.com"
+        "https://v4.api.ipinfo.io/ip"
+        "https://ipv4.myexternalip.com/raw"
+        "https://4.ident.me"
+        "https://check-host.net/ip"
+    )
+    local server_ip=""
+    for ip_address in "${URL_lists[@]}"; do
+        local response=$(curl -s -w "\n%{http_code}" --max-time 3 "${ip_address}" 2> /dev/null)
+        local http_code=$(echo "$response" | tail -n1)
+        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]"')
+        if [[ "${http_code}" == "200" && "${ip_result}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            server_ip="${ip_result}"
+            break
+        fi
+    done
+
+    if [[ -n "$server_ip" ]]; then
+        LOGI "Server IP detected: ${server_ip}"
+        if ! confirm "Is ${server_ip} the correct incoming public IPv4 address for this server?" "y"; then
+            server_ip=""
+        fi
+    else
+        LOGI "Could not auto-detect server IP from any provider."
+    fi
+
+    while [[ -z "$server_ip" ]]; do
+        read -rp "Please enter your server's public IPv4 address: " server_ip
+        server_ip="${server_ip// /}"
+        if [[ ! "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            LOGE "Invalid IPv4 address. Please try again."
+            server_ip=""
+        fi
+    done
+
+    LOGI "Issuing certificate for server IP: ${server_ip}"
+
+    # Ask for optional IPv6
+    local ipv6_addr=""
+    read -rp "Do you have an IPv6 address to include? (leave empty to skip): " ipv6_addr
+    ipv6_addr="${ipv6_addr// /}" # Trim whitespace
+
+    # check for acme.sh first
+    if ! command -v ~/.acme.sh/acme.sh &> /dev/null; then
+        LOGI "acme.sh not found, installing..."
+        install_acme
+        if [ $? -ne 0 ]; then
+            LOGE "Failed to install acme.sh"
+            return 1
+        fi
+    fi
+
+    # install socat
+    case "${release}" in
+        ubuntu | debian | armbian)
+            apt-get update > /dev/null 2>&1 && apt-get install socat -y > /dev/null 2>&1
+            ;;
+        fedora | amzn | virtuozzo | rhel | almalinux | rocky | ol)
+            dnf makecache -y > /dev/null 2>&1 && dnf -y install socat > /dev/null 2>&1
+            ;;
+        centos)
+            if [[ "${VERSION_ID}" =~ ^7 ]]; then
+                yum makecache -y > /dev/null 2>&1 && yum -y install socat > /dev/null 2>&1
+            else
+                dnf makecache -y > /dev/null 2>&1 && dnf -y install socat > /dev/null 2>&1
+            fi
+            ;;
+        arch | manjaro | parch)
+            pacman -Sy --noconfirm socat > /dev/null 2>&1
+            ;;
+        opensuse-tumbleweed | opensuse-leap)
+            zypper refresh > /dev/null 2>&1 && zypper -q install -y socat > /dev/null 2>&1
+            ;;
+        alpine)
+            apk add socat curl openssl > /dev/null 2>&1
+            ;;
+        *)
+            LOGW "Unsupported OS for automatic socat installation"
+            ;;
+    esac
+
+    # Create certificate directory
+    certPath="/root/cert/ip"
+    mkdir -p "$certPath"
+
+    # Build domain arguments
+    local domain_args="-d ${server_ip}"
+    if [[ -n "$ipv6_addr" ]] && is_ipv6 "$ipv6_addr"; then
+        domain_args="${domain_args} -d ${ipv6_addr}"
+        LOGI "Including IPv6 address: ${ipv6_addr}"
+    fi
+
+    # Choose port for HTTP-01 listener (default 80, allow override)
+    local WebPort=""
+    read -rp "Port to use for ACME HTTP-01 listener (default 80): " WebPort
+    WebPort="${WebPort:-80}"
+    if ! [[ "${WebPort}" =~ ^[0-9]+$ ]] || ((WebPort < 1 || WebPort > 65535)); then
+        LOGE "Invalid port provided. Falling back to 80."
+        WebPort=80
+    fi
+    LOGI "Using port ${WebPort} to issue certificate for IP: ${server_ip}"
+    if [[ "${WebPort}" -ne 80 ]]; then
+        LOGI "Reminder: Let's Encrypt still reaches port 80; forward external port 80 to ${WebPort} for validation."
+    fi
+
+    while true; do
+        if is_port_in_use "${WebPort}"; then
+            LOGI "Port ${WebPort} is currently in use."
+
+            local alt_port=""
+            read -rp "Enter another port for acme.sh standalone listener (leave empty to abort): " alt_port
+            alt_port="${alt_port// /}"
+            if [[ -z "${alt_port}" ]]; then
+                LOGE "Port ${WebPort} is busy; cannot proceed with issuance."
+                return 1
+            fi
+            if ! [[ "${alt_port}" =~ ^[0-9]+$ ]] || ((alt_port < 1 || alt_port > 65535)); then
+                LOGE "Invalid port provided."
+                return 1
+            fi
+            WebPort="${alt_port}"
+            continue
+        else
+            LOGI "Port ${WebPort} is free and ready for standalone validation."
+            break
+        fi
+    done
+
+    # Reload command - restarts panel after renewal
+    local reloadCmd="systemctl restart x-ui 2>/dev/null || rc-service x-ui restart 2>/dev/null"
+
+    # issue the certificate for IP with shortlived profile
+    ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt --force
+    ~/.acme.sh/acme.sh --issue \
+        ${domain_args} \
+        --standalone \
+        --server letsencrypt \
+        --certificate-profile shortlived \
+        --days 6 \
+        --httpport ${WebPort} \
+        --force
+
+    if [ $? -ne 0 ]; then
+        LOGE "Failed to issue certificate for IP: ${server_ip}"
+        LOGE "Make sure port ${WebPort} is open and the server is accessible from the internet"
+        # Cleanup acme.sh data for both IPv4 and IPv6 if specified
+        rm -rf ~/.acme.sh/${server_ip} ~/.acme.sh/${server_ip}_ecc 2> /dev/null
+        [[ -n "$ipv6_addr" ]] && rm -rf ~/.acme.sh/${ipv6_addr} ~/.acme.sh/${ipv6_addr}_ecc 2> /dev/null
+        rm -rf ${certPath} 2> /dev/null
+        return 1
+    else
+        LOGI "Certificate issued successfully for IP: ${server_ip}"
+    fi
+
+    # Install the certificate
+    # Note: acme.sh may report "Reload error" and exit non-zero if reloadcmd fails,
+    # but the cert files are still installed. We check for files instead of exit code.
+    ~/.acme.sh/acme.sh --installcert --force -d ${server_ip} \
+        --key-file "${certPath}/privkey.pem" \
+        --fullchain-file "${certPath}/fullchain.pem" \
+        --reloadcmd "${reloadCmd}" 2>&1 || true
+
+    # Verify certificate files exist (don't rely on exit code - reloadcmd failure causes non-zero)
+    if [[ ! -f "${certPath}/fullchain.pem" || ! -f "${certPath}/privkey.pem" ]]; then
+        LOGE "Certificate files not found after installation"
+        # Cleanup acme.sh data for both IPv4 and IPv6 if specified
+        rm -rf ~/.acme.sh/${server_ip} ~/.acme.sh/${server_ip}_ecc 2> /dev/null
+        [[ -n "$ipv6_addr" ]] && rm -rf ~/.acme.sh/${ipv6_addr} ~/.acme.sh/${ipv6_addr}_ecc 2> /dev/null
+        rm -rf ${certPath} 2> /dev/null
+        return 1
+    fi
+
+    LOGI "Certificate files installed successfully"
+
+    # enable auto-renew
+    ~/.acme.sh/acme.sh --upgrade --auto-upgrade > /dev/null 2>&1
+    chmod 600 $certPath/privkey.pem 2> /dev/null
+    chmod 644 $certPath/fullchain.pem 2> /dev/null
+
+    # Prompt user to set panel paths after successful certificate installation
+    local webCertFile="${certPath}/fullchain.pem"
+    local webKeyFile="${certPath}/privkey.pem"
+
+    read -rp "Would you like to set this certificate for the panel? (y/n): " setPanel
+    if [[ "$setPanel" == "y" || "$setPanel" == "Y" ]]; then
+        if [[ -f "$webCertFile" && -f "$webKeyFile" ]]; then
+            ${xui_folder}/x-ui cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+            LOGI "Panel paths set for IP: $server_ip"
+            LOGI "  - Certificate File: $webCertFile"
+            LOGI "  - Private Key File: $webKeyFile"
+            LOGI "  - Validity: ~6 days (auto-renews via acme.sh cron)"
+            echo -e "${green}Access URL: https://${server_ip}:${existing_port}${existing_webBasePath}${plain}"
+            LOGI "Panel will restart to apply SSL certificate..."
+            restart
+        else
+            LOGE "Error: Certificate or private key file not found for IP: $server_ip."
+            return 1
+        fi
+    else
+        LOGI "Skipping panel path setting."
+    fi
+
+    return 0
+}
+
+ssl_cert_issue() {
+    local existing_webBasePath=$(${xui_folder}/x-ui setting -show true | grep -Eo 'webBasePath: .+' | awk '{print $2}')
+    local existing_port=$(${xui_folder}/x-ui setting -show true | grep -Eo 'port: .+' | awk '{print $2}')
+    # check for acme.sh first
+    if ! command -v ~/.acme.sh/acme.sh &> /dev/null; then
+        echo "acme.sh could not be found. we will install it"
+        install_acme
+        if [ $? -ne 0 ]; then
+            LOGE "install acme failed, please check logs"
+            exit 1
+        fi
+    fi
+
+    # install socat
+    case "${release}" in
+        ubuntu | debian | armbian)
+            apt-get update > /dev/null 2>&1 && apt-get install socat -y > /dev/null 2>&1
+            ;;
+        fedora | amzn | virtuozzo | rhel | almalinux | rocky | ol)
+            dnf makecache -y > /dev/null 2>&1 && dnf -y install socat > /dev/null 2>&1
+            ;;
+        centos)
+            if [[ "${VERSION_ID}" =~ ^7 ]]; then
+                yum makecache -y > /dev/null 2>&1 && yum -y install socat > /dev/null 2>&1
+            else
+                dnf makecache -y > /dev/null 2>&1 && dnf -y install socat > /dev/null 2>&1
+            fi
+            ;;
+        arch | manjaro | parch)
+            pacman -Sy --noconfirm socat > /dev/null 2>&1
+            ;;
+        opensuse-tumbleweed | opensuse-leap)
+            zypper refresh > /dev/null 2>&1 && zypper -q install -y socat > /dev/null 2>&1
+            ;;
+        alpine)
+            apk add socat curl openssl > /dev/null 2>&1
+            ;;
+        *)
+            LOGW "Unsupported OS for automatic socat installation"
+            ;;
+    esac
+    if [ $? -ne 0 ]; then
+        LOGE "install socat failed, please check logs"
+        exit 1
+    else
+        LOGI "install socat succeed..."
+    fi
+
+    # get the domain here, and we need to verify it
+    local domain=""
+    while true; do
+        read -rp "Please enter your domain name: " domain
+        domain="${domain// /}" # Trim whitespace
+
+        if [[ -z "$domain" ]]; then
+            LOGE "Domain name cannot be empty. Please try again."
+            continue
+        fi
+
+        if ! is_domain "$domain"; then
+            LOGE "Invalid domain format: ${domain}. Please enter a valid domain name."
+            continue
+        fi
+
+        break
+    done
+    LOGD "Your domain is: ${domain}, checking it..."
+    SSL_ISSUED_DOMAIN="${domain}"
+
+    # detect existing certificate and reuse it only if its files are actually
+    # present and non-empty. acme.sh stores ECC certs under ${domain}_ecc and RSA
+    # certs under ${domain}; a failed issuance can leave a domain entry in --list
+    # with no usable cert files, which must not be reused (it produces a 0-byte
+    # fullchain.pem). Broken partial state is cleaned up so issuance can proceed.
+    local cert_exists=0
+    if ~/.acme.sh/acme.sh --list 2> /dev/null | awk '{print $1}' | grep -Fxq "${domain}"; then
+        local acmeCertDir=""
+        if [[ -s ~/.acme.sh/${domain}_ecc/fullchain.cer && -s ~/.acme.sh/${domain}_ecc/${domain}.key ]]; then
+            acmeCertDir=~/.acme.sh/${domain}_ecc
+        elif [[ -s ~/.acme.sh/${domain}/fullchain.cer && -s ~/.acme.sh/${domain}/${domain}.key ]]; then
+            acmeCertDir=~/.acme.sh/${domain}
+        fi
+        if [[ -n "${acmeCertDir}" ]]; then
+            cert_exists=1
+            local certInfo=$(~/.acme.sh/acme.sh --list 2> /dev/null | grep -F "${domain}")
+            LOGI "Existing certificate found for ${domain}, will reuse it."
+            [[ -n "${certInfo}" ]] && LOGI "${certInfo}"
+        else
+            LOGW "Found incomplete acme.sh state for ${domain} (no valid certificate files); cleaning it up and re-issuing."
+            rm -rf ~/.acme.sh/${domain} ~/.acme.sh/${domain}_ecc
+        fi
+    fi
+    if [[ ${cert_exists} -eq 0 ]]; then
+        LOGI "Your domain is ready for issuing certificates now..."
+    fi
+
+    # create a directory for the certificate
+    certPath="/root/cert/${domain}"
+    if [ ! -d "$certPath" ]; then
+        mkdir -p "$certPath"
+    else
+        rm -rf "$certPath"
+        mkdir -p "$certPath"
+    fi
+
+    # get the port number for the standalone server
+    local WebPort=80
+    read -rp "Please choose which port to use (default is 80): " WebPort
+    if [[ -z ${WebPort} ]]; then
+        WebPort=80
+    elif [[ ! ${WebPort} =~ ^[1-9][0-9]*$ || ${WebPort} -gt 65535 ]]; then
+        LOGE "Your input ${WebPort} is invalid, will use default port 80."
+        WebPort=80
+    fi
+    LOGI "Will use port: ${WebPort} to issue certificates. Please make sure this port is open."
+
+    if [[ ${cert_exists} -eq 0 ]]; then
+        # issue the certificate
+        ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt --force
+        ~/.acme.sh/acme.sh --issue -d ${domain} $(acme_listen_flag) --standalone --httpport ${WebPort} --force
+        if [ $? -ne 0 ]; then
+            LOGE "Issuing certificate failed, please check logs."
+            rm -rf ~/.acme.sh/${domain} ~/.acme.sh/${domain}_ecc
+            exit 1
+        else
+            LOGE "Issuing certificate succeeded, installing certificates..."
+        fi
+    else
+        LOGI "Using existing certificate, installing certificates..."
+    fi
+
+    reloadCmd="x-ui restart"
+
+    LOGI "Default --reloadcmd for ACME is: ${yellow}x-ui restart"
+    LOGI "This command will run on every certificate issue and renew."
+    read -rp "Would you like to modify --reloadcmd for ACME? (y/n): " setReloadcmd
+    if [[ "$setReloadcmd" == "y" || "$setReloadcmd" == "Y" ]]; then
+        echo -e "\n${green}\t1.${plain} Preset: systemctl reload nginx ; x-ui restart"
+        echo -e "${green}\t2.${plain} Input your own command"
+        echo -e "${green}\t0.${plain} Keep default reloadcmd"
+        read -rp "Choose an option: " choice
+        case "$choice" in
+            1)
+                LOGI "Reloadcmd is: systemctl reload nginx ; x-ui restart"
+                reloadCmd="systemctl reload nginx ; x-ui restart"
+                ;;
+            2)
+                LOGD "It's recommended to put x-ui restart at the end, so it won't raise an error if other services fails"
+                read -rp "Please enter your reloadcmd (example: systemctl reload nginx ; x-ui restart): " reloadCmd
+                LOGI "Your reloadcmd is: ${reloadCmd}"
+                ;;
+            *)
+                LOGI "Keep default reloadcmd"
+                ;;
+        esac
+    fi
+
+    # install the certificate
+    local installOutput=""
+    installOutput=$(~/.acme.sh/acme.sh --installcert --force -d ${domain} \
+        --key-file /root/cert/${domain}/privkey.pem \
+        --fullchain-file /root/cert/${domain}/fullchain.pem --reloadcmd "${reloadCmd}" 2>&1)
+    local installRc=$?
+    echo "${installOutput}"
+
+    local installWroteFiles=0
+    if echo "${installOutput}" | grep -q "Installing key to:" && echo "${installOutput}" | grep -q "Installing full chain to:"; then
+        installWroteFiles=1
+    fi
+
+    if [[ -f "/root/cert/${domain}/privkey.pem" && -f "/root/cert/${domain}/fullchain.pem" && (${installRc} -eq 0 || ${installWroteFiles} -eq 1) ]]; then
+        LOGI "Installing certificate succeeded, enabling auto renew..."
+    else
+        LOGE "Installing certificate failed, exiting."
+        if [[ ${cert_exists} -eq 0 ]]; then
+            rm -rf ~/.acme.sh/${domain} ~/.acme.sh/${domain}_ecc
+        fi
+        exit 1
+    fi
+
+    # enable auto-renew
+    ~/.acme.sh/acme.sh --upgrade --auto-upgrade
+    if [ $? -ne 0 ]; then
+        LOGE "Auto renew failed, certificate details:"
+        ls -lah cert/*
+        chmod 600 $certPath/privkey.pem
+        chmod 644 $certPath/fullchain.pem
+        exit 1
+    else
+        LOGI "Auto renew succeeded, certificate details:"
+        ls -lah cert/*
+        chmod 600 $certPath/privkey.pem
+        chmod 644 $certPath/fullchain.pem
+    fi
+
+    # Prompt user to set panel paths after successful certificate installation
+    read -rp "Would you like to set this certificate for the panel? (y/n): " setPanel
+    if [[ "$setPanel" == "y" || "$setPanel" == "Y" ]]; then
+        local webCertFile="/root/cert/${domain}/fullchain.pem"
+        local webKeyFile="/root/cert/${domain}/privkey.pem"
+
+        if [[ -f "$webCertFile" && -f "$webKeyFile" ]]; then
+            ${xui_folder}/x-ui cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+            LOGI "Panel paths set for domain: $domain"
+            LOGI "  - Certificate File: $webCertFile"
+            LOGI "  - Private Key File: $webKeyFile"
+            echo -e "${green}Access URL: https://${domain}:${existing_port}${existing_webBasePath}${plain}"
+            restart
+        else
+            LOGE "Error: Certificate or private key file not found for domain: $domain."
+        fi
+    else
+        LOGI "Skipping panel path setting."
+    fi
+}
+
+ssl_cert_issue_CF() {
+    local existing_webBasePath=$(${xui_folder}/x-ui setting -show true | grep -Eo 'webBasePath: .+' | awk '{print $2}')
+    local existing_port=$(${xui_folder}/x-ui setting -show true | grep -Eo 'port: .+' | awk '{print $2}')
+    LOGI "****** Instructions for Use ******"
+    LOGI "Follow the steps below to complete the process:"
+    LOGI "1. A Cloudflare API Token (recommended, scoped to Zone:DNS:Edit) or the Global API Key + registered email."
+    LOGI "2. The Domain Name."
+    LOGI "3. Once the certificate is issued, you will be prompted to set the certificate for the panel (optional)."
+    LOGI "4. The script also supports automatic renewal of the SSL certificate after installation."
+
+    confirm "Do you confirm the information and wish to proceed? [y/n]" "y"
+
+    if [ $? -eq 0 ]; then
+        # Check for acme.sh first
+        if ! command -v ~/.acme.sh/acme.sh &> /dev/null; then
+            echo "acme.sh could not be found. We will install it."
+            install_acme
+            if [ $? -ne 0 ]; then
+                LOGE "Install acme failed, please check logs."
+                exit 1
+            fi
+        fi
+
+        CF_Domain=""
+
+        LOGD "Please set a domain name:"
+        read -rp "Input your domain here: " CF_Domain
+        LOGD "Your domain name is set to: ${CF_Domain}"
+
+        # Cloudflare API credentials: an API Token (recommended, scoped to a
+        # single zone) or the account-wide Global API Key. acme.sh reads
+        # CF_Token for tokens, or CF_Key + CF_Email for the Global Key.
+        CF_KeyType=""
+        read -rp "Are you using a Cloudflare API Token or Global API Key? (t/g) [Default t]: " CF_KeyType
+        CF_KeyType=${CF_KeyType:-t}
+
+        if [[ "$CF_KeyType" == "g" || "$CF_KeyType" == "G" ]]; then
+            CF_GlobalKey=""
+            CF_AccountEmail=""
+            LOGD "Please set the Global API Key:"
+            read -rp "Input your key here: " CF_GlobalKey
+            LOGD "Please set up the registered email:"
+            read -rp "Input your email here: " CF_AccountEmail
+            export CF_Key="${CF_GlobalKey}"
+            export CF_Email="${CF_AccountEmail}"
+        else
+            CF_ApiToken=""
+            LOGD "Please set the API Token:"
+            read -rp "Input your token here: " CF_ApiToken
+            export CF_Token="${CF_ApiToken}"
+        fi
+
+        # Set the default CA to Let's Encrypt
+        ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt --force
+        if [ $? -ne 0 ]; then
+            LOGE "Default CA, Let'sEncrypt fail, script exiting..."
+            exit 1
+        fi
+
+        # Issue the certificate using Cloudflare DNS
+        ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${CF_Domain} -d *.${CF_Domain} --log --force
+        if [ $? -ne 0 ]; then
+            LOGE "Certificate issuance failed, script exiting..."
+            exit 1
+        else
+            LOGI "Certificate issued successfully, Installing..."
+        fi
+
+        # Install the certificate
+        certPath="/root/cert/${CF_Domain}"
+        if [ -d "$certPath" ]; then
+            rm -rf ${certPath}
+        fi
+
+        mkdir -p ${certPath}
+        if [ $? -ne 0 ]; then
+            LOGE "Failed to create directory: ${certPath}"
+            exit 1
+        fi
+
+        reloadCmd="x-ui restart"
+
+        LOGI "Default --reloadcmd for ACME is: ${yellow}x-ui restart"
+        LOGI "This command will run on every certificate issue and renew."
+        read -rp "Would you like to modify --reloadcmd for ACME? (y/n): " setReloadcmd
+        if [[ "$setReloadcmd" == "y" || "$setReloadcmd" == "Y" ]]; then
+            echo -e "\n${green}\t1.${plain} Preset: systemctl reload nginx ; x-ui restart"
+            echo -e "${green}\t2.${plain} Input your own command"
+            echo -e "${green}\t0.${plain} Keep default reloadcmd"
+            read -rp "Choose an option: " choice
+            case "$choice" in
+                1)
+                    LOGI "Reloadcmd is: systemctl reload nginx ; x-ui restart"
+                    reloadCmd="systemctl reload nginx ; x-ui restart"
+                    ;;
+                2)
+                    LOGD "It's recommended to put x-ui restart at the end, so it won't raise an error if other services fails"
+                    read -rp "Please enter your reloadcmd (example: systemctl reload nginx ; x-ui restart): " reloadCmd
+                    LOGI "Your reloadcmd is: ${reloadCmd}"
+                    ;;
+                *)
+                    LOGI "Keep default reloadcmd"
+                    ;;
+            esac
+        fi
+        ~/.acme.sh/acme.sh --installcert --force -d ${CF_Domain} -d *.${CF_Domain} \
+            --key-file ${certPath}/privkey.pem \
+            --fullchain-file ${certPath}/fullchain.pem --reloadcmd "${reloadCmd}"
+
+        if [ $? -ne 0 ]; then
+            LOGE "Certificate installation failed, script exiting..."
+            exit 1
+        else
+            LOGI "Certificate installed successfully, Turning on automatic updates..."
+        fi
+
+        # Enable auto-update
+        ~/.acme.sh/acme.sh --upgrade --auto-upgrade
+        if [ $? -ne 0 ]; then
+            LOGE "Auto update setup failed, script exiting..."
+            exit 1
+        else
+            LOGI "The certificate is installed and auto-renewal is turned on. Specific information is as follows:"
+            ls -lah ${certPath}/*
+            chmod 600 ${certPath}/privkey.pem
+            chmod 644 ${certPath}/fullchain.pem
+        fi
+
+        # Prompt user to set panel paths after successful certificate installation
+        read -rp "Would you like to set this certificate for the panel? (y/n): " setPanel
+        if [[ "$setPanel" == "y" || "$setPanel" == "Y" ]]; then
+            local webCertFile="${certPath}/fullchain.pem"
+            local webKeyFile="${certPath}/privkey.pem"
+
+            if [[ -f "$webCertFile" && -f "$webKeyFile" ]]; then
+                ${xui_folder}/x-ui cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+                LOGI "Panel paths set for domain: $CF_Domain"
+                LOGI "  - Certificate File: $webCertFile"
+                LOGI "  - Private Key File: $webKeyFile"
+                echo -e "${green}Access URL: https://${CF_Domain}:${existing_port}${existing_webBasePath}${plain}"
+                restart
+            else
+                LOGE "Error: Certificate or private key file not found for domain: $CF_Domain."
+            fi
+        else
+            LOGI "Skipping panel path setting."
+        fi
+    else
+        show_menu
+    fi
+}
+
+run_speedtest() {
+    # Check if Speedtest is already installed
+    if ! command -v speedtest &> /dev/null; then
+        # If not installed, determine installation method
+        if command -v snap &> /dev/null; then
+            # Use snap to install Speedtest
+            echo "Installing Speedtest using snap..."
+            snap install speedtest
+        else
+            # Fallback to using package managers
+            local pkg_manager=""
+            local speedtest_install_script=""
+
+            if command -v dnf &> /dev/null; then
+                pkg_manager="dnf"
+                speedtest_install_script="https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.rpm.sh"
+            elif command -v yum &> /dev/null; then
+                pkg_manager="yum"
+                speedtest_install_script="https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.rpm.sh"
+            elif command -v apt-get &> /dev/null; then
+                pkg_manager="apt-get"
+                speedtest_install_script="https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh"
+            elif command -v apt &> /dev/null; then
+                pkg_manager="apt"
+                speedtest_install_script="https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh"
+            fi
+
+            if [[ -z $pkg_manager ]]; then
+                echo "Error: Package manager not found. You may need to install Speedtest manually."
+                return 1
+            else
+                echo "Installing Speedtest using $pkg_manager..."
+                curl -s $speedtest_install_script | bash
+                $pkg_manager install -y speedtest
+            fi
+        fi
+    fi
+
+    speedtest
+}
+
+ip_validation() {
+    ipv6_regex="^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$"
+    ipv4_regex="^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)$"
+}
+
+iplimit_main() {
+    echo -e "\n${green}\t1.${plain} Install Fail2ban and configure IP Limit"
+    echo -e "${green}\t2.${plain} Change Ban Duration"
+    echo -e "${green}\t3.${plain} Unban Everyone"
+    echo -e "${green}\t4.${plain} Ban Logs"
+    echo -e "${green}\t5.${plain} Ban an IP Address"
+    echo -e "${green}\t6.${plain} Unban an IP Address"
+    echo -e "${green}\t7.${plain} Real-Time Logs"
+    echo -e "${green}\t8.${plain} Service Status"
+    echo -e "${green}\t9.${plain} Service Restart"
+    echo -e "${green}\t10.${plain} Uninstall Fail2ban and IP Limit"
+    echo -e "${green}\t0.${plain} Back to Main Menu"
+    read -rp "Choose an option: " choice
+    case "$choice" in
+        0)
+            show_menu
+            ;;
+        1)
+            confirm "Proceed with installation of Fail2ban & IP Limit?" "y"
+            if [[ $? == 0 ]]; then
+                install_iplimit
+            else
+                iplimit_main
+            fi
+            ;;
+        2)
+            read -rp "Please enter new Ban Duration in Minutes [default 30]: " NUM
+            if [[ $NUM =~ ^[0-9]+$ ]]; then
+                create_iplimit_jails ${NUM}
+                if [[ $release == "alpine" ]]; then
+                    rc-service fail2ban restart
+                else
+                    systemctl restart fail2ban
+                fi
+            else
+                echo -e "${red}${NUM} is not a number! Please, try again.${plain}"
+            fi
+            iplimit_main
+            ;;
+        3)
+            confirm "Proceed with Unbanning everyone from IP Limit jail?" "y"
+            if [[ $? == 0 ]]; then
+                fail2ban-client reload --restart --unban 3x-ipl
+                truncate -s 0 "${iplimit_banned_log_path}"
+                echo -e "${green}All users Unbanned successfully.${plain}"
+                iplimit_main
+            else
+                echo -e "${yellow}Cancelled.${plain}"
+            fi
+            iplimit_main
+            ;;
+        4)
+            show_banlog
+            iplimit_main
+            ;;
+        5)
+            read -rp "Enter the IP address you want to ban: " ban_ip
+            ip_validation
+            if [[ $ban_ip =~ $ipv4_regex || $ban_ip =~ $ipv6_regex ]]; then
+                fail2ban-client set 3x-ipl banip "$ban_ip"
+                echo -e "${green}IP Address ${ban_ip} has been banned successfully.${plain}"
+            else
+                echo -e "${red}Invalid IP address format! Please try again.${plain}"
+            fi
+            iplimit_main
+            ;;
+        6)
+            read -rp "Enter the IP address you want to unban: " unban_ip
+            ip_validation
+            if [[ $unban_ip =~ $ipv4_regex || $unban_ip =~ $ipv6_regex ]]; then
+                fail2ban-client set 3x-ipl unbanip "$unban_ip"
+                echo -e "${green}IP Address ${unban_ip} has been unbanned successfully.${plain}"
+            else
+                echo -e "${red}Invalid IP address format! Please try again.${plain}"
+            fi
+            iplimit_main
+            ;;
+        7)
+            tail -f /var/log/fail2ban.log
+            iplimit_main
+            ;;
+        8)
+            service fail2ban status
+            iplimit_main
+            ;;
+        9)
+            if [[ $release == "alpine" ]]; then
+                rc-service fail2ban restart
+            else
+                systemctl restart fail2ban
+            fi
+            iplimit_main
+            ;;
+        10)
+            remove_iplimit
+            iplimit_main
+            ;;
+        *)
+            echo -e "${red}Invalid option. Please select a valid number.${plain}\n"
+            iplimit_main
+            ;;
+    esac
+}
+
+setup_fail2ban_iplimit() {
+    # Honor the same toggle the panel uses (isFail2BanEnabled): enabled when the
+    # var is unset or exactly "true"; any other explicit value means the operator
+    # opted out, so do nothing rather than install a fail2ban the panel ignores.
+    if [[ -n "${XUI_ENABLE_FAIL2BAN+x}" && "${XUI_ENABLE_FAIL2BAN}" != "true" ]]; then
+        echo -e "${yellow}XUI_ENABLE_FAIL2BAN=${XUI_ENABLE_FAIL2BAN}, skipping Fail2ban setup.${plain}\n"
+        return 0
+    fi
+
+    if ! command -v fail2ban-client &> /dev/null; then
+        echo -e "${green}Fail2ban is not installed. Installing now...!${plain}\n"
+
+        # Install fail2ban together with nftables. Recent fail2ban packages
+        # default to `banaction = nftables-multiport` in /etc/fail2ban/jail.conf,
+        # but the `nftables` package isn't pulled in as a dependency on most
+        # minimal server images (Debian 12+, Ubuntu 24+, fresh RHEL-family).
         # Without `nft` in PATH the default sshd jail fails to ban with
         #   stderr: '/bin/sh: 1: nft: not found'
         # even though our own 3x-ipl jail uses iptables. Bundling the binary
@@ -2979,75 +3783,13 @@ ${green}Multi-country Exit Pool${plain}
 }
 
 show_usage() {
-    echo -e "┌────────────────────────────────────────────────────────────────┐
-│  ${blue}x-ui control menu usages (subcommands):${plain}                       │
-│                                                                │
-│  ${blue}x-ui${plain}                       - Admin Management Script          │
-│  ${blue}x-ui start${plain}                 - Start                            │
-│  ${blue}x-ui stop${plain}                  - Stop                             │
-│  ${blue}x-ui restart${plain}               - Restart                          │
-|  ${blue}x-ui restart-xray${plain}          - Restart Xray                     │
-│  ${blue}x-ui status${plain}                - Current Status                   │
-│  ${blue}x-ui settings${plain}              - Current Settings                 │
-│  ${blue}x-ui enable${plain}                - Enable Autostart on OS Startup   │
-│  ${blue}x-ui disable${plain}               - Disable Autostart on OS Startup  │
-│  ${blue}x-ui log${plain}                   - Check logs                       │
-│  ${blue}x-ui banlog${plain}                - Check Fail2ban ban logs          │
-│  ${blue}x-ui update${plain}                - Update                           │
-│  ${blue}x-ui update-dev${plain}            - Update to Dev channel (latest)   │
-│  ${blue}x-ui update-all-geofiles${plain}   - Update all geo files             │
-│  ${blue}x-ui migrateDB [file]${plain}      - Convert .db <-> .dump (SQLite)   │
-│  ${blue}x-ui pgclient [ver]${plain}        - Upgrade pg_dump/pg_restore tools │
-│  ${blue}x-ui legacy${plain}                - Legacy version                   │
-│  ${blue}x-ui install${plain}               - Install                          │
-│  ${blue}x-ui uninstall${plain}             - Uninstall                        │
-└────────────────────────────────────────────────────────────────┘"
+    echo -e "鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${blue}x-ui control menu usages (subcommands):${plain}                       鈹?鈹?                                                               鈹?鈹? ${blue}x-ui${plain}                       - Admin Management Script          鈹?鈹? ${blue}x-ui start${plain}                 - Start                            鈹?鈹? ${blue}x-ui stop${plain}                  - Stop                             鈹?鈹? ${blue}x-ui restart${plain}               - Restart                          鈹?|  ${blue}x-ui restart-xray${plain}          - Restart Xray                     鈹?鈹? ${blue}x-ui status${plain}                - Current Status                   鈹?鈹? ${blue}x-ui settings${plain}              - Current Settings                 鈹?鈹? ${blue}x-ui enable${plain}                - Enable Autostart on OS Startup   鈹?鈹? ${blue}x-ui disable${plain}               - Disable Autostart on OS Startup  鈹?鈹? ${blue}x-ui log${plain}                   - Check logs                       鈹?鈹? ${blue}x-ui banlog${plain}                - Check Fail2ban ban logs          鈹?鈹? ${blue}x-ui update${plain}                - Update                           鈹?鈹? ${blue}x-ui update-dev${plain}            - Update to Dev channel (latest)   鈹?鈹? ${blue}x-ui update-all-geofiles${plain}   - Update all geo files             鈹?鈹? ${blue}x-ui migrateDB [file]${plain}      - Convert .db <-> .dump (SQLite)   鈹?鈹? ${blue}x-ui pgclient [ver]${plain}        - Upgrade pg_dump/pg_restore tools 鈹?鈹? ${blue}x-ui legacy${plain}                - Legacy version                   鈹?鈹? ${blue}x-ui install${plain}               - Install                          鈹?鈹? ${blue}x-ui uninstall${plain}             - Uninstall                        鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?
     echo -e "  ${blue}x-ui exit-pool {install|update|access|status|uninstall}${plain}"
 }
 
 show_menu() {
     echo -e "
-╔────────────────────────────────────────────────╗
-│  ${green}3X-UI Panel Management Script${plain}                │
-│  ${green}0.${plain} Exit Script                               │
-│────────────────────────────────────────────────│
-│  ${green}1.${plain} Install                                   │
-│  ${green}2.${plain} Update                                    │
-│  ${green}3.${plain} Update to Dev Channel (latest commit)     │
-│  ${green}4.${plain} Update Menu                               │
-│  ${green}5.${plain} Legacy Version                            │
-│  ${green}6.${plain} Uninstall                                 │
-│────────────────────────────────────────────────│
-│  ${green}7.${plain} Reset Username & Password                 │
-│  ${green}8.${plain} Reset Web Base Path                       │
-│  ${green}9.${plain} Reset Settings                            │
-│  ${green}10.${plain} Change Port                              │
-│  ${green}11.${plain} View Current Settings                    │
-│────────────────────────────────────────────────│
-│  ${green}12.${plain} Start                                    │
-│  ${green}13.${plain} Stop                                     │
-│  ${green}14.${plain} Restart                                  │
-|  ${green}15.${plain} Restart Xray                             │
-│  ${green}16.${plain} Check Status                             │
-│  ${green}17.${plain} Logs Management                          │
-│────────────────────────────────────────────────│
-│  ${green}18.${plain} Enable Autostart                         │
-│  ${green}19.${plain} Disable Autostart                        │
-│────────────────────────────────────────────────│
-│  ${green}20.${plain} SSL Certificate Management               │
-│  ${green}21.${plain} Cloudflare SSL Certificate               │
-│  ${green}22.${plain} IP Limit Management                      │
-│  ${green}23.${plain} Firewall Management                      │
-│  ${green}24.${plain} SSH Port Forwarding Management           │
-│  ${green}25.${plain} PostgreSQL Management                    │
-│────────────────────────────────────────────────│
-│  ${green}26.${plain} BBR / BBRv3 Management                  │
-│  ${green}27.${plain} Update Geo Files                         │
-│  ${green}28.${plain} Speedtest by Ookla                       │
-│  ${green}29.${plain} Network Privacy & DNS Guard               │
-│  ${green}30.${plain} Multi-country Exit Pool                   │
-╚────────────────────────────────────────────────╝
-"
+鈺斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈺?鈹? ${green}3X-UI Panel Management Script${plain}                鈹?鈹? ${green}0.${plain} Exit Script                               鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}1.${plain} Install                                   鈹?鈹? ${green}2.${plain} Update                                    鈹?鈹? ${green}3.${plain} Update to Dev Channel (latest commit)     鈹?鈹? ${green}4.${plain} Update Menu                               鈹?鈹? ${green}5.${plain} Legacy Version                            鈹?鈹? ${green}6.${plain} Uninstall                                 鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}7.${plain} Reset Username & Password                 鈹?鈹? ${green}8.${plain} Reset Web Base Path                       鈹?鈹? ${green}9.${plain} Reset Settings                            鈹?鈹? ${green}10.${plain} Change Port                              鈹?鈹? ${green}11.${plain} View Current Settings                    鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}12.${plain} Start                                    鈹?鈹? ${green}13.${plain} Stop                                     鈹?鈹? ${green}14.${plain} Restart                                  鈹?|  ${green}15.${plain} Restart Xray                             鈹?鈹? ${green}16.${plain} Check Status                             鈹?鈹? ${green}17.${plain} Logs Management                          鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}18.${plain} Enable Autostart                         鈹?鈹? ${green}19.${plain} Disable Autostart                        鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}20.${plain} SSL Certificate Management               鈹?鈹? ${green}21.${plain} Cloudflare SSL Certificate               鈹?鈹? ${green}22.${plain} IP Limit Management                      鈹?鈹? ${green}23.${plain} Firewall Management                      鈹?鈹? ${green}24.${plain} SSH Port Forwarding Management           鈹?鈹? ${green}25.${plain} PostgreSQL Management                    鈹?鈹傗攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? ${green}26.${plain} BBR / BBRv3 Management                  鈹?鈹? ${green}27.${plain} Update Geo Files                         鈹?鈹? ${green}28.${plain} Speedtest by Ookla                       鈹?鈹? ${green}29.${plain} Network Privacy & DNS Guard               鈹?鈹? ${green}30.${plain} Multi-country Exit Pool                   鈹?鈺氣攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈺?"
     show_status
     echo && read -rp "Please enter your selection [0-30]: " num
 
