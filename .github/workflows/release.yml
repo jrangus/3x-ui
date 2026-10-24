@@ -47,7 +47,7 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      # Frontend dist must be built BEFORE go build — Go's //go:embed
+      # Frontend dist must be built BEFORE go build 鈥?Go's //go:embed
       # all:dist directive in internal/web/web.go requires internal/web/dist/ to exist
       # at compile time. internal/web/dist/ is .gitignored, so on a fresh CI
       # checkout it doesn't exist until vite emits it.
@@ -115,7 +115,13 @@ jobs:
           cd x-ui/bin
 
           # Download dependencies
-          Xray_URL="https://github.com/XTLS/Xray-core/releases/download/v26.10.10/"
+          XRAY_VER=$(curl -sf $CURL_RETRY -o /dev/null -w '%{redirect_url}' "https://github.com/XTLS/Xray-core/releases/latest" | sed -n 's#.*/releases/tag/##p')
+          if [[ ! "$XRAY_VER" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "could not resolve the latest Xray-core release tag: $XRAY_VER" >&2
+            exit 1
+          fi
+          echo "Using Xray-core $XRAY_VER"
+          Xray_URL="https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/"
           if [ "${{ matrix.platform }}" == "amd64" ]; then
             fetch ${Xray_URL}Xray-linux-64.zip
             unzip Xray-linux-64.zip
@@ -155,10 +161,10 @@ jobs:
           mv xray xray-linux-${{ matrix.platform }}
           # mtg-multi (MTProto sidecar) ships prebuilt release binaries whose
           # platform labels match our matrix, so download and unpack the matching
-          # archive. Only the platforms the fork publishes are packaged — the tag
+          # archive. Only the platforms the fork publishes are packaged 鈥?the tag
           # lookup lives inside that branch so unpackaged platforms (s390x) never
           # depend on it. The tag comes from the release-page redirect on
-          # github.com — the host the downloads need anyway — because api.github.com
+          # github.com 鈥?the host the downloads need anyway 鈥?because api.github.com
           # has 503'd whole release runs while asset downloads kept working.
           case "${{ matrix.platform }}" in
             amd64|arm64|armv7|armv6|386)
@@ -219,7 +225,7 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      # Frontend dist must be built BEFORE go build — see comment on the
+      # Frontend dist must be built BEFORE go build 鈥?see comment on the
       # Linux job above. This step is identical except npm runs on the
       # Windows runner here.
       - name: Setup Node.js
@@ -278,7 +284,10 @@ jobs:
           cd x-ui\bin
 
           # Download Xray for Windows
-          $Xray_URL = "https://github.com/XTLS/Xray-core/releases/download/v26.10.10/"
+          $XrayVersion = (curl.exe -sf --retry 5 --retry-all-errors --retry-delay 3 -o NUL -w '%{redirect_url}' "https://github.com/XTLS/Xray-core/releases/latest") -replace '^.*/releases/tag/', ''
+          if (-not $XrayVersion -or $XrayVersion -notmatch '^v\d+\.\d+\.\d+$') { throw "could not resolve the latest Xray-core release tag: $XrayVersion" }
+          Write-Host "Using Xray-core $XrayVersion"
+          $Xray_URL = "https://github.com/XTLS/Xray-core/releases/download/$XrayVersion/"
           Invoke-WebRequest @retry -Uri "${Xray_URL}Xray-windows-64.zip" -OutFile "Xray-windows-64.zip"
           Expand-Archive -Path "Xray-windows-64.zip" -DestinationPath .
           Remove-Item "Xray-windows-64.zip"
@@ -293,7 +302,7 @@ jobs:
 
           # mtg-multi (MTProto sidecar) publishes a prebuilt Windows binary, so
           # download and unpack it instead of compiling. The tag comes from the
-          # release-page redirect on github.com — not api.github.com, whose
+          # release-page redirect on github.com 鈥?not api.github.com, whose
           # outages have failed release runs while asset downloads kept working.
           $MTG_MULTI_VER = (curl.exe -sf --retry 5 --retry-all-errors --retry-delay 3 -o NUL -w '%{redirect_url}' "https://github.com/mhsanaei/mtg-multi/releases/latest") -replace '^.*/releases/tag/', ''
           if (-not $MTG_MULTI_VER -or $MTG_MULTI_VER -notmatch '^v[\d.]+$') { throw "could not resolve the latest mtg-multi release tag" }
@@ -381,7 +390,7 @@ jobs:
             return 1
           }
           short="${COMMIT::8}"
-          notes="Rolling development build — installs via the panel's Dev update channel.
+          notes="Rolling development build 鈥?installs via the panel's Dev update channel.
 
           commit=${COMMIT}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -401,3 +410,4 @@ jobs:
           fi
 
           retry gh release upload dev-latest dev-artifacts/*.tar.gz dev-artifacts/*.zip dev-artifacts/*.sha256 --clobber
+
