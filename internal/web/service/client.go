@@ -66,10 +66,11 @@ type ClientService struct{}
 var ErrClientNotInInbound = errors.New("client not found in inbound")
 
 type ClientCreatePayload struct {
-	Client     model.Client           `json:"client"`
-	InboundIds []int                  `json:"inboundIds"`
-	LimitHwid  int                    `json:"-"`
-	Traffic    *ClientPortableTraffic `json:"traffic,omitempty"`
+	Client           model.Client           `json:"client"`
+	InboundIds       []int                  `json:"inboundIds"`
+	LimitHwid        int                    `json:"-"`
+	Traffic          *ClientPortableTraffic `json:"traffic,omitempty"`
+	AllowSharedSubID bool                   `json:"-"`
 }
 
 const sqlInChunk = 400
@@ -119,3 +120,4 @@ func (p ClientCreatePayload) MarshalJSON() ([]byte, error) {
 		Traffic:    p.Traffic,
 	})
 }
+

@@ -52,3 +52,36 @@ func TestCreateRepeatKeepsExistingUUID(t *testing.T) {
 		t.Fatalf("inbound B settings did not reuse the original UUID")
 	}
 }
+
+func TestCreateAllowsSharedSubIDOnlyForInternalCaller(t *testing.T) {
+	setupBulkDB(t)
+	svc := &ClientService{}
+	inboundSvc := &InboundService{}
+	inbound := mkInbound(t, 21003, model.VLESS, `{"clients":[]}`)
+
+	first := ClientCreatePayload{
+		Client:     model.Client{Email: "pool-us@exit.local", SubID: "pool-shared", Enable: true},
+		InboundIds: []int{inbound.Id},
+	}
+	if _, err := svc.Create(inboundSvc, &first); err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	second := ClientCreatePayload{
+		Client:           model.Client{Email: "pool-jp@exit.local", SubID: "pool-shared", Enable: true},
+		InboundIds:       []int{inbound.Id},
+		AllowSharedSubID: true,
+	}
+	if _, err := svc.Create(inboundSvc, &second); err != nil {
+		t.Fatalf("shared-subId Create: %v", err)
+	}
+
+	third := ClientCreatePayload{
+		Client:     model.Client{Email: "ordinary@x", SubID: "pool-shared", Enable: true},
+		InboundIds: []int{inbound.Id},
+	}
+	if _, err := svc.Create(inboundSvc, &third); err == nil {
+		t.Fatal("ordinary Create unexpectedly reused a shared subId")
+	}
+}
+

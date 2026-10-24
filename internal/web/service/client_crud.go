@@ -209,7 +209,7 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 		}
 	}
 
-	if client.SubID != "" {
+	if client.SubID != "" && !payload.AllowSharedSubID {
 		var subTaken int64
 		if err := database.GetDB().Model(&model.ClientRecord{}).
 			Where("sub_id = ? AND email <> ?", client.SubID, client.Email).
@@ -1199,3 +1199,4 @@ func (s *ClientService) Detach(inboundSvc *InboundService, id int, inboundIds []
 	}
 	return fanoutInboundApplies(applies)
 }
+

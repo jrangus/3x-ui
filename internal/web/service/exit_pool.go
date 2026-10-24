@@ -382,12 +382,15 @@ func (s *ExitPoolService) Sync(userID int, req ExitPoolSyncRequest) (ExitPoolGro
 	existing := map[int]ClientWithAttachments{}
 	managedEmails := map[string]bool{}
 	for _, row := range clients {
-		if row.SubID != req.SubID || !strings.HasPrefix(row.Email, exitPoolClientPrefix) || !strings.HasSuffix(row.Email, exitPoolClientDomain) {
+		if row.SubID != req.SubID {
 			continue
+		}
+		if !strings.HasPrefix(row.Email, exitPoolClientPrefix) || !strings.HasSuffix(row.Email, exitPoolClientDomain) {
+			return ExitPoolGroup{}, errors.New("subId already belongs to a regular client")
 		}
 		member, ok := parseExitPoolComment(row.Comment)
 		if !ok {
-			continue
+			return ExitPoolGroup{}, errors.New("subId already belongs to an invalid exit-pool client")
 		}
 		if len(row.InboundIds) != 1 || row.InboundIds[0] != req.InboundID {
 			return ExitPoolGroup{}, errors.New("this exit-pool group belongs to a different inbound")
@@ -395,18 +398,26 @@ func (s *ExitPoolService) Sync(userID int, req ExitPoolSyncRequest) (ExitPoolGro
 		existing[member.Slot] = row
 		managedEmails[row.Email] = true
 	}
+	createdEmails := make([]string, 0, len(desired))
+	rollbackCreated := func() {
+		for i := len(createdEmails) - 1; i >= 0; i-- {
+			_, _ = s.ClientService.DeleteByEmail(&s.InboundService, createdEmails[i], false)
+		}
+	}
 	for _, e := range desired {
 		if _, ok := existing[e.Slot]; ok {
 			continue
 		}
 		client := model.Client{Email: exitPoolEmail(req.SubID, e), SubID: req.SubID, Group: "Exit Pool / " + req.Name, Comment: exitPoolComment(e), Enable: true, TrafficReset: "never", Security: "auto"}
-		needRestart, createErr := s.ClientService.Create(&s.InboundService, &ClientCreatePayload{Client: client, InboundIds: []int{req.InboundID}})
+		needRestart, createErr := s.ClientService.Create(&s.InboundService, &ClientCreatePayload{Client: client, InboundIds: []int{req.InboundID}, AllowSharedSubID: true})
 		if needRestart {
 			s.XrayService.SetToNeedRestart()
 		}
 		if createErr != nil {
+			rollbackCreated()
 			return ExitPoolGroup{}, createErr
 		}
+		createdEmails = append(createdEmails, client.Email)
 		managedEmails[client.Email] = true
 	}
 	for slot, row := range existing {
@@ -422,6 +433,7 @@ func (s *ExitPoolService) Sync(userID int, req ExitPoolSyncRequest) (ExitPoolGro
 		}
 	}
 	if err := s.writeRoutingForSub(inbound, req.SubID, desired, managedEmails); err != nil {
+		rollbackCreated()
 		return ExitPoolGroup{}, err
 	}
 	if s.XrayService.IsXrayRunning() {
