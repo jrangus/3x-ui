@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"net/http"
+
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 
@@ -17,12 +19,28 @@ func NewExitPoolController(g *gin.RouterGroup) *ExitPoolController {
 	g.GET("", a.state)
 	g.POST("/sync", a.sync)
 	g.POST("/delete/:subId", a.delete)
+	g.Any("/console/*path", a.console)
 	return a
 }
 
 func (a *ExitPoolController) state(c *gin.Context) {
-	state, err := a.service.State(session.GetLoginUser(c).Id)
+	state, err := a.service.State(session.GetLoginUser(c).Id, c.Request.Host)
 	jsonObj(c, state, err)
+}
+
+func (a *ExitPoolController) console(c *gin.Context) {
+	token, err := session.EnsureCSRFToken(c)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	// xnvgatebox ships a self-contained console with inline JS/CSS. It is only
+	// served here after 3x-ui authentication and may only be framed by 3x-ui.
+	c.Header("X-Frame-Options", "SAMEORIGIN")
+	c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'")
+	if err := a.service.ProxyConsole(c.Writer, c.Request, c.Param("path"), token); err != nil {
+		c.String(http.StatusBadGateway, "%s", err.Error())
+	}
 }
 
 func (a *ExitPoolController) sync(c *gin.Context) {
@@ -31,7 +49,7 @@ func (a *ExitPoolController) sync(c *gin.Context) {
 		jsonObj(c, nil, err)
 		return
 	}
-	group, err := a.service.Sync(session.GetLoginUser(c).Id, request)
+	group, err := a.service.Sync(session.GetLoginUser(c).Id, c.Request.Host, request)
 	if err != nil {
 		jsonObj(c, nil, err)
 		return
@@ -52,3 +70,4 @@ func (a *ExitPoolController) delete(c *gin.Context) {
 func websocketNotifyXrayAndClients() {
 	notifyClientsChanged()
 }
+

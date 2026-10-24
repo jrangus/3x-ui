@@ -50,6 +50,7 @@ interface MemberRow {
 interface GroupRow {
   subId: string;
   name: string;
+  subUrl: string;
   inboundId: number;
   inboundTag: string;
   members: MemberRow[];
@@ -75,6 +76,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
   const [name, setName] = useState('Multi-region');
   const [subId, setSubId] = useState('');
   const [exitSort, setExitSort] = useState<'region' | 'latency'>('region');
+  const [showConsole, setShowConsole] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -123,6 +125,15 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
     () => sortedExits.filter((exit) => exit.status === 'up'),
     [sortedExits],
   );
+  const orderedSlots = useMemo(() => {
+    const rank = new Map(readyExits.map((exit, index) => [exit.slot, index]));
+    return [...slots].sort(
+      (left, right) =>
+        (rank.get(left) ?? Number.MAX_SAFE_INTEGER) -
+          (rank.get(right) ?? Number.MAX_SAFE_INTEGER) || left - right,
+    );
+  }, [readyExits, slots]);
+  const consoleUrl = `${(window.X_UI_BASE_PATH || '/').replace(/\/?$/, '/')}panel/api/exit-pool/console/`;
 
   async function syncGroup() {
     if (!inboundId || slots.length === 0 || !name.trim()) {
@@ -133,7 +144,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
     try {
       const response = await HttpUtil.post<GroupRow>(
         '/panel/api/exit-pool/sync',
-        { inboundId, slots, name: name.trim(), subId },
+        { inboundId, slots: orderedSlots, name: name.trim(), subId },
         { ...JSON_HEADERS, silent: true },
       );
       if (!response.success) {
@@ -248,13 +259,18 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
           <Col xs={24} lg={8}>
             <Select
               mode="multiple"
-              value={slots}
+              value={orderedSlots}
               placeholder="选择多个国家或地区出口"
               options={readyExits.map((exit) => ({
                 value: exit.slot,
                 label: `${exit.country || exit.region || 'Unknown'} · ${exit.exitIp || exit.host} · ${Math.round(exit.latencyMs || 0)}ms`,
               }))}
-              onChange={setSlots}
+              onChange={(next) => {
+                const selected = new Set(next);
+                setSlots(
+                  readyExits.filter((exit) => selected.has(exit.slot)).map((exit) => exit.slot),
+                );
+              }}
               style={{ width: '100%' }}
             />
           </Col>
@@ -348,6 +364,21 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
               ),
             },
             {
+              title: '综合订阅链接',
+              render: (_, row: GroupRow) =>
+                row.subUrl ? (
+                  <Typography.Text
+                    copyable={{ text: row.subUrl }}
+                    style={{ maxWidth: 260 }}
+                    ellipsis
+                  >
+                    {row.subUrl}
+                  </Typography.Text>
+                ) : (
+                  <Typography.Text type="secondary">请先在面板设置中启用订阅服务</Typography.Text>
+                ),
+            },
+            {
               title: '操作',
               render: (_, row: GroupRow) => (
                 <Space>
@@ -368,9 +399,29 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
           ]}
         />
         <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-          创建后到“客户端”页面搜索上面的订阅
-          ID。出口池生成的身份默认不显示在普通客户端列表；需要复制订阅地址或排查时，可在客户端页面开启“显示出口池系统客户端”。订阅中的节点名称会显示订阅组、地区和出口编号，但都使用同一个服务器端口。
+          直接复制表格中的“综合订阅链接”导入客户端即可。内部地区身份仍默认隐藏，避免污染普通客户端列表；需要排查时可在客户端页面开启“显示出口池系统客户端”。订阅中的节点名称会显示订阅组、地区和出口编号，但都使用同一个服务器端口。
         </Typography.Paragraph>
+      </Card>
+
+      <Card
+        size="small"
+        title="xnvgatebox · 集成控制台"
+        extra={
+          <Button disabled={!state?.installed} onClick={() => setShowConsole((value) => !value)}>
+            {showConsole ? '关闭控制台' : '打开控制台'}
+          </Button>
+        }
+      >
+        <Typography.Paragraph type="secondary">
+          控制台通过3x-ui登录态访问，xnvgatebox 管理端口仅监听本机，不再提供公网独立入口。
+        </Typography.Paragraph>
+        {showConsole && (
+          <iframe
+            title="xnvgatebox 集成控制台"
+            src={consoleUrl}
+            style={{ width: '100%', height: '80vh', minHeight: 720, border: 0, borderRadius: 8 }}
+          />
+        )}
       </Card>
     </Space>
   );

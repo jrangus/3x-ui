@@ -776,6 +776,12 @@ update_x-ui() {
 
     config_after_update
 
+    # Existing xnvgatebox installations must not keep a public management
+    # listener now that the console is proxied through authenticated 3x-ui.
+    if command -v xnvgatebox > /dev/null 2>&1 && [[ -f /var/lib/xnvgatebox/fanout/settings.json ]]; then
+        /usr/bin/x-ui exit-pool secure || echo -e "${yellow}Warning: failed to restrict xnvgatebox to loopback; run 'x-ui exit-pool secure' manually.${plain}"
+    fi
+
     # IP Limit relies on fail2ban; install + configure it now so the feature
     # works out of the box on update too (no-op when XUI_ENABLE_FAIL2BAN=false).
     # Never fatal.
@@ -807,3 +813,4 @@ echo -e "${green}Running...${plain}"
 require_writable_update_paths
 install_base
 update_x-ui $1
+

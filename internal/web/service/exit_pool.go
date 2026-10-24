@@ -72,6 +72,7 @@ type ExitPoolMember struct {
 type ExitPoolGroup struct {
 	SubID       string           `json:"subId"`
 	Name        string           `json:"name"`
+	SubURL      string           `json:"subUrl"`
 	InboundID   int              `json:"inboundId"`
 	InboundTag  string           `json:"inboundTag"`
 	Members     []ExitPoolMember `json:"members"`
@@ -166,50 +167,58 @@ func readExitPoolFile(name string, limit int64) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func (s *ExitPoolService) loadExits() ([]ExitPoolExit, error) {
+func newExitPoolHTTPClient(ctx context.Context, timeout time.Duration) (*http.Client, string, error) {
 	settingsRaw, err := readExitPoolFile("settings.json", 64<<10)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var settings struct {
 		Port int `json:"port"`
 	}
 	if json.Unmarshal(settingsRaw, &settings) != nil || settings.Port < 1 || settings.Port > 65535 {
-		return nil, errors.New("invalid xnvgatebox settings")
+		return nil, "", errors.New("invalid xnvgatebox settings")
 	}
 	baseRaw, err := readExitPoolFile("basepath", 4096)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	passwordRaw, err := readExitPoolFile("password", 4096)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	base := strings.Trim(strings.TrimSpace(string(baseRaw)), "/")
 	password := strings.TrimSpace(string(passwordRaw))
 	if base == "" || strings.Contains(base, "/") || password == "" {
-		return nil, errors.New("invalid xnvgatebox access files")
+		return nil, "", errors.New("invalid xnvgatebox access files")
 	}
 
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Timeout: 8 * time.Second, Jar: jar}
+	client := &http.Client{Timeout: timeout, Jar: jar}
 	root := fmt.Sprintf("http://127.0.0.1:%d/%s", settings.Port, base)
 	form := url.Values{"password": {password}}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
 	loginReq, err := http.NewRequestWithContext(ctx, http.MethodPost, root+"/login", strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(loginReq)
 	if err != nil {
-		return nil, fmt.Errorf("connect to xnvgatebox: %w", err)
+		return nil, "", fmt.Errorf("connect to xnvgatebox: %w", err)
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
-		return nil, fmt.Errorf("xnvgatebox login returned HTTP %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("xnvgatebox login returned HTTP %d", resp.StatusCode)
+	}
+	return client, root, nil
+}
+
+func (s *ExitPoolService) loadExits() ([]ExitPoolExit, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	client, root, err := newExitPoolHTTPClient(ctx, 8*time.Second)
+	if err != nil {
+		return nil, err
 	}
 	exitsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, root+"/api/exits", nil)
 	if err != nil {
@@ -248,6 +257,60 @@ func (s *ExitPoolService) loadExits() ([]ExitPoolExit, error) {
 	return exits, nil
 }
 
+// ProxyConsole exposes xnvgatebox only through the authenticated 3x-ui panel.
+// The upstream listener is expected to be loopback-only; its password and
+// session cookie are never sent to the browser.
+func (s *ExitPoolService) ProxyConsole(w http.ResponseWriter, r *http.Request, subPath, csrfToken string) error {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	client, root, err := newExitPoolHTTPClient(ctx, 2*time.Minute)
+	if err != nil {
+		return err
+	}
+	cleanPath := "/" + strings.TrimLeft(subPath, "/")
+	upstreamURL, err := url.Parse(root + cleanPath)
+	if err != nil {
+		return err
+	}
+	upstreamURL.RawQuery = r.URL.RawQuery
+	request, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), r.Body)
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{"Accept", "Accept-Language", "Content-Type", "Range"} {
+		if value := r.Header.Get(name); value != "" {
+			request.Header.Set(name, value)
+		}
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("xnvgatebox console request failed: %w", err)
+	}
+	defer response.Body.Close()
+	for _, name := range []string{"Cache-Control", "Content-Disposition", "Content-Length", "Content-Range", "Content-Type"} {
+		if value := response.Header.Get(name); value != "" {
+			w.Header().Set(name, value)
+		}
+	}
+	contentType := response.Header.Get("Content-Type")
+	if strings.Contains(contentType, "text/html") {
+		blob, readErr := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+		if readErr != nil {
+			return readErr
+		}
+		tokenJSON, _ := json.Marshal(csrfToken)
+		bridge := `<script>(()=>{const t=` + string(tokenJSON) + `,f=window.fetch.bind(window);window.fetch=(i,o={})=>{const m=(o.method||"GET").toUpperCase();if(!["GET","HEAD","OPTIONS","TRACE"].includes(m)){const h=new Headers(o.headers||{});h.set("X-CSRF-Token",t);o={...o,headers:h}}return f(i,o)}})();</script>`
+		blob = []byte(strings.Replace(string(blob), "<head>", "<head>"+bridge, 1))
+		w.Header().Del("Content-Length")
+		w.WriteHeader(response.StatusCode)
+		_, err = w.Write(blob)
+		return err
+	}
+	w.WriteHeader(response.StatusCode)
+	_, err = io.Copy(w, io.LimitReader(response.Body, 64<<20))
+	return err
+}
+
 func (s *ExitPoolService) compatibleInbounds(userID int) ([]ExitPoolInbound, error) {
 	rows, err := s.InboundService.GetInbounds(userID)
 	if err != nil {
@@ -266,7 +329,7 @@ func (s *ExitPoolService) compatibleInbounds(userID int) ([]ExitPoolInbound, err
 	return out, nil
 }
 
-func (s *ExitPoolService) groups() ([]ExitPoolGroup, error) {
+func (s *ExitPoolService) groups(host string) ([]ExitPoolGroup, error) {
 	rows, err := s.ClientService.List()
 	if err != nil {
 		return nil, err
@@ -289,19 +352,29 @@ func (s *ExitPoolService) groups() ([]ExitPoolGroup, error) {
 		g.Members = append(g.Members, member)
 	}
 	result := make([]ExitPoolGroup, 0, len(bySub))
+	subEnabled, _ := s.SettingService.GetSubEnable()
+	subBase, _ := s.SettingService.GetSubURI()
+	if subBase == "" {
+		subBase = s.SettingService.BuildSubURIBase(host)
+		subPath, _ := s.SettingService.GetSubPath()
+		subBase += subPath
+	}
 	for _, g := range bySub {
 		if ib, err := s.InboundService.GetInbound(g.InboundID); err == nil {
 			g.InboundTag = ib.Tag
 		}
 		slices.SortFunc(g.Members, func(a, b ExitPoolMember) int { return a.Slot - b.Slot })
 		g.MemberCount = len(g.Members)
+		if subEnabled && subBase != "" {
+			g.SubURL = strings.TrimRight(subBase, "/") + "/" + g.SubID
+		}
 		result = append(result, *g)
 	}
 	slices.SortFunc(result, func(a, b ExitPoolGroup) int { return strings.Compare(a.Name, b.Name) })
 	return result, nil
 }
 
-func (s *ExitPoolService) State(userID int) (ExitPoolState, error) {
+func (s *ExitPoolService) State(userID int, host string) (ExitPoolState, error) {
 	state := ExitPoolState{Installed: true, Exits: []ExitPoolExit{}, Inbounds: []ExitPoolInbound{}, Groups: []ExitPoolGroup{}}
 	if _, err := os.Stat(exitPoolDir); err != nil {
 		if os.IsNotExist(err) {
@@ -315,7 +388,7 @@ func (s *ExitPoolService) State(userID int) (ExitPoolState, error) {
 	if err != nil {
 		return state, err
 	}
-	state.Groups, err = s.groups()
+	state.Groups, err = s.groups(host)
 	if err != nil {
 		return state, err
 	}
@@ -363,7 +436,7 @@ func isManagedExitPoolRule(rule map[string]any) bool {
 	return false
 }
 
-func (s *ExitPoolService) Sync(userID int, req ExitPoolSyncRequest) (ExitPoolGroup, error) {
+func (s *ExitPoolService) Sync(userID int, host string, req ExitPoolSyncRequest) (ExitPoolGroup, error) {
 	if req.InboundID < 1 || len(req.Slots) == 0 {
 		return ExitPoolGroup{}, errors.New("choose one inbound and at least one exit")
 	}
@@ -477,7 +550,7 @@ func (s *ExitPoolService) Sync(userID int, req ExitPoolSyncRequest) (ExitPoolGro
 			return ExitPoolGroup{}, err
 		}
 	}
-	groups, err := s.groups()
+	groups, err := s.groups(host)
 	if err != nil {
 		return ExitPoolGroup{}, err
 	}
@@ -653,3 +726,4 @@ func (s *ExitPoolService) Delete(subID string) error {
 	}
 	return nil
 }
+

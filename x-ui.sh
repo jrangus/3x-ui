@@ -3695,6 +3695,41 @@ migrate_db_prompt() {
     migrate_db "$input" "$output"
 }
 
+exit_pool_secure() {
+    local settings="/var/lib/xnvgatebox/fanout/settings.json"
+    if [[ ! -f "$settings" ]]; then
+        LOGI "Exit pool is not installed."
+        return 0
+    fi
+    if ! command -v python3 > /dev/null 2>&1; then
+        LOGE "python3 is required to secure the xnvgatebox listener."
+        return 1
+    fi
+    if ! python3 - "$settings" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    value = json.load(handle)
+value["listen_addr"] = "127.0.0.1"
+tmp = path + ".xui.tmp"
+with open(tmp, "w", encoding="utf-8") as handle:
+    json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
+    handle.write("\n")
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+PY
+    then
+        LOGE "Failed to restrict the xnvgatebox management listener."
+        return 1
+    fi
+    systemctl restart xnvgatebox-fanout.service
+    if [[ $? -ne 0 ]]; then
+        LOGE "xnvgatebox listener was secured, but its service failed to restart."
+        return 1
+    fi
+    LOGI "xnvgatebox management is now loopback-only and available from the 3x-ui integrated console."
+}
+
 exit_pool_install() {
     local version="${XUI_EXIT_POOL_VERSION:-v0.9.5}"
     local installer_revision="d7b76f4fa4dc563808991a9ea84e4ae3baae5e69"
@@ -3725,8 +3760,9 @@ exit_pool_install() {
         LOGE "Multi-country exit pool installation failed."
         return "$rc"
     fi
+    exit_pool_secure || return 1
     LOGI "Multi-country exit pool installed. Existing 3x-ui routes are unchanged until you create an explicit binding."
-    xnvgatebox access
+    LOGI "Open 3x-ui -> Xray Settings -> Multi-country Exit Pool to manage it."
 }
 
 exit_pool_dispatch() {
@@ -3735,11 +3771,16 @@ exit_pool_dispatch() {
         install) exit_pool_install ;;
         update)
             command -v xnvgatebox > /dev/null 2>&1 || { LOGE "Exit pool is not installed."; return 1; }
-            xnvgatebox update
+            xnvgatebox update && exit_pool_secure
             ;;
         access)
             command -v xnvgatebox > /dev/null 2>&1 || { LOGE "Exit pool is not installed."; return 1; }
-            xnvgatebox access
+            exit_pool_secure
+            LOGI "The standalone xnvgatebox URL is disabled. Open it inside the 3x-ui exit-pool page."
+            ;;
+        secure)
+            command -v xnvgatebox > /dev/null 2>&1 || { LOGE "Exit pool is not installed."; return 1; }
+            exit_pool_secure
             ;;
         status)
             if ! command -v xnvgatebox > /dev/null 2>&1; then
@@ -3755,7 +3796,7 @@ exit_pool_dispatch() {
             xnvgatebox uninstall
             ;;
         *)
-            LOGE "Usage: x-ui exit-pool {install|update|access|status|uninstall}"
+            LOGE "Usage: x-ui exit-pool {install|update|secure|status|uninstall}"
             return 2
             ;;
     esac
@@ -3766,7 +3807,7 @@ exit_pool_menu() {
 ${green}Multi-country Exit Pool${plain}
   0. Back
   1. Install
-  2. Show access URL
+  2. Restrict management to the 3x-ui integrated console
   3. Update
   4. Status
   5. Uninstall"
@@ -3806,7 +3847,7 @@ show_usage() {
 │  ${blue}x-ui install${plain}               - Install                          │
 │  ${blue}x-ui uninstall${plain}             - Uninstall                        │
 └────────────────────────────────────────────────────────────────┘"
-    echo -e "  ${blue}x-ui exit-pool {install|update|access|status|uninstall}${plain}"
+    echo -e "  ${blue}x-ui exit-pool {install|update|secure|status|uninstall}${plain}"
 }
 
 show_menu() {
@@ -4034,3 +4075,4 @@ if [[ $# > 0 ]]; then
 else
     show_menu
 fi
+
