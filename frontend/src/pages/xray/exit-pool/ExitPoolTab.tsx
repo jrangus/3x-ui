@@ -1,3 +1,4 @@
+Finished in 45ms on 1 files using 4 threads.
 import { useMemo, useState } from 'react';
 import {
   Alert,
@@ -38,6 +39,7 @@ interface ExitPoolOutbound {
 function exitPoolOutbounds(template: XraySettingsValue | null): ExitPoolOutbound[] {
   const rows: ExitPoolOutbound[] = [];
   for (const outbound of template?.outbounds || []) {
+    if (!outbound || typeof outbound !== 'object') continue;
     const outboundRecord = outbound as unknown as Record<string, unknown>;
     const tag = typeof outboundRecord.tag === 'string' ? outboundRecord.tag : '';
     if (!tag.startsWith(EXIT_POOL_TAG_PREFIX)) continue;
