@@ -152,7 +152,7 @@ func TestListPagedHidesExitPoolSystemClientsByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPaged default: %v", err)
 	}
-	if got := clientEmails(visible.Items); !slices.Equal(got, []string{"ordinary@x"}) {
+	if got := pagedEmails(visible.Items); !slices.Equal(got, []string{"ordinary@x"}) {
 		t.Fatalf("default clients = %v", got)
 	}
 
@@ -160,7 +160,7 @@ func TestListPagedHidesExitPoolSystemClientsByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPaged include system: %v", err)
 	}
-	if got := clientEmails(all.Items); !slices.Equal(got, []string{"ordinary@x", "xnv3-pool-us@exit.local"}) {
+	if got := pagedEmails(all.Items); !slices.Equal(got, []string{"ordinary@x", "xnv3-pool-us@exit.local"}) {
 		t.Fatalf("all clients = %v", got)
 	}
 }

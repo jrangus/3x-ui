@@ -224,7 +224,7 @@ func (s *ExitPoolService) loadExits() ([]ExitPoolExit, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err = client.Do(exitsReq)
+	resp, err := client.Do(exitsReq)
 	if err != nil {
 		return nil, fmt.Errorf("read xnvgatebox exits: %w", err)
 	}
@@ -726,4 +726,3 @@ func (s *ExitPoolService) Delete(subID string) error {
 	}
 	return nil
 }
-

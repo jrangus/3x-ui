@@ -813,4 +813,3 @@ echo -e "${green}Running...${plain}"
 require_writable_update_paths
 install_base
 update_x-ui $1
-

@@ -426,4 +426,3 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
     </Space>
   );
 }
-
