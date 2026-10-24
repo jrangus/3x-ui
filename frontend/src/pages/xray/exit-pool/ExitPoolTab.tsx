@@ -1,4 +1,3 @@
-Finished in 45ms on 1 files using 4 threads.
 import { useMemo, useState } from 'react';
 import {
   Alert,
