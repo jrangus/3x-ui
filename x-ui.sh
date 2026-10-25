@@ -3697,6 +3697,8 @@ migrate_db_prompt() {
 
 exit_pool_secure() {
     local settings="/var/lib/xnvgatebox/fanout/settings.json"
+    local dropin_dir="/etc/systemd/system/xnvgatebox-fanout.service.d"
+    local dropin="${dropin_dir}/20-3x-ui-hardening.conf"
     if [[ ! -f "$settings" ]]; then
         LOGI "Exit pool is not installed."
         return 0
@@ -3706,34 +3708,82 @@ exit_pool_secure() {
         return 1
     fi
     if ! python3 - "$settings" <<'PY'
-import json, os, sys
+import json, os, stat, sys
 path = sys.argv[1]
-with open(path, "r", encoding="utf-8") as handle:
-    value = json.load(handle)
+info = os.lstat(path)
+if not stat.S_ISREG(info.st_mode):
+    raise SystemExit("settings.json must be a regular file")
+flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+fd = os.open(path, flags)
+try:
+    with os.fdopen(fd, "r", encoding="utf-8") as handle:
+        value = json.load(handle)
+finally:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
 value["listen_addr"] = "127.0.0.1"
 tmp = path + ".xui.tmp"
-with open(tmp, "w", encoding="utf-8") as handle:
-    json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
-    handle.write("\n")
-os.chmod(tmp, 0o600)
-os.replace(tmp, path)
+try:
+    out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(out, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
+finally:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
 PY
     then
         LOGE "Failed to restrict the xnvgatebox management listener."
         return 1
     fi
-    systemctl restart xnvgatebox-fanout.service
-    if [[ $? -ne 0 ]]; then
+    install -d -m 0755 "$dropin_dir"
+    if ! install -m 0644 /dev/stdin "$dropin" <<'EOF'
+[Service]
+# Keep the privileged network-namespace worker functional while removing
+# unrelated privilege-escalation and host-inspection surfaces.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+UMask=0077
+EOF
+    then
+        LOGE "Failed to install the xnvgatebox systemd hardening policy."
+        return 1
+    fi
+    systemctl daemon-reload
+    if ! systemctl restart xnvgatebox-fanout.service; then
         LOGE "xnvgatebox listener was secured, but its service failed to restart."
+        return 1
+    fi
+    if ! systemctl is-active --quiet xnvgatebox-fanout.service; then
+        LOGE "xnvgatebox hardening verification failed: service is not active."
         return 1
     fi
     LOGI "xnvgatebox management is now loopback-only and available from the 3x-ui integrated console."
 }
 
-exit_pool_install() {
-    local version="${XUI_EXIT_POOL_VERSION:-v0.9.5}"
+exit_pool_install() (
+    local version="v0.9.5"
     local installer_revision="d7b76f4fa4dc563808991a9ea84e4ae3baae5e69"
-    local installer
+    local installer_sha256="b0815ea91bb005f7b8c9614dd669cb1da399545b6242c72ac914c572293fd6f3"
+    local package_sha256="8a07f1746f32cc7af91fab31f786d1c92a76493a2ab13d2ebe346555461bedc2"
+    local task_dir installer package release_url
 
     if [[ "${running_in_docker}" == "true" ]]; then
         LOGE "The multi-country exit pool needs host network namespaces and is not supported inside the 3x-ui container."
@@ -3747,15 +3797,32 @@ exit_pool_install() {
         LOGE "curl is required. Install curl and try again."
         return 1
     fi
-    installer=$(mktemp /tmp/xnvgatebox-install.XXXXXX.sh) || return 1
-    if ! curl -fsSL "https://raw.githubusercontent.com/hanhaoops/xnvgatebox/${installer_revision}/vps/install.sh" -o "$installer"; then
-        rm -f -- "$installer"
+    task_dir=$(mktemp -d /tmp/xnvgatebox-xui.XXXXXX) || return 1
+    trap 'rm -rf -- "$task_dir"' EXIT
+    installer="${task_dir}/install.sh"
+    package="${task_dir}/xnvgatebox-linux-amd64.tar.gz"
+    release_url="https://github.com/hanhaoops/xnvgatebox/releases/download/${version}"
+    if ! curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 \
+        "https://raw.githubusercontent.com/hanhaoops/xnvgatebox/${installer_revision}/vps/install.sh" -o "$installer"; then
         LOGE "Failed to download the pinned xnvgatebox installer (${version})."
         return 1
     fi
-    bash "$installer" --version "$version"
+    if ! printf '%s  %s\n' "$installer_sha256" "$installer" | sha256sum -c -; then
+        LOGE "The xnvgatebox installer did not match the reviewed 3x-ui checksum."
+        return 1
+    fi
+    if ! curl -fL --progress-bar --retry 3 --connect-timeout 15 --max-time 300 \
+        "${release_url}/xnvgatebox-linux-amd64.tar.gz" -o "$package"; then
+        LOGE "Failed to download the pinned xnvgatebox package (${version})."
+        return 1
+    fi
+    if ! printf '%s  %s\n' "$package_sha256" "$package" | sha256sum -c -; then
+        LOGE "The xnvgatebox package did not match the reviewed 3x-ui checksum."
+        return 1
+    fi
+    printf '%s  xnvgatebox-linux-amd64.tar.gz\n' "$package_sha256" > "${task_dir}/checksums.txt"
+    bash "$installer" --version "$version" --package "$package"
     local rc=$?
-    rm -f -- "$installer"
     if [[ $rc -ne 0 ]]; then
         LOGE "Multi-country exit pool installation failed."
         return "$rc"
@@ -3763,7 +3830,7 @@ exit_pool_install() {
     exit_pool_secure || return 1
     LOGI "Multi-country exit pool installed. Existing 3x-ui routes are unchanged until you create an explicit binding."
     LOGI "Open 3x-ui -> Xray Settings -> Multi-country Exit Pool to manage it."
-}
+)
 
 exit_pool_dispatch() {
     local action="${1:-menu}"
@@ -3771,7 +3838,8 @@ exit_pool_dispatch() {
         install) exit_pool_install ;;
         update)
             command -v xnvgatebox > /dev/null 2>&1 || { LOGE "Exit pool is not installed."; return 1; }
-            xnvgatebox update && exit_pool_secure
+            LOGI "Reinstalling the 3x-ui-reviewed exit-pool build; mutable upstream auto-update is disabled."
+            exit_pool_install
             ;;
         access)
             command -v xnvgatebox > /dev/null 2>&1 || { LOGE "Exit pool is not installed."; return 1; }
@@ -4075,3 +4143,4 @@ if [[ $# > 0 ]]; then
 else
     show_menu
 fi
+

@@ -13,9 +13,10 @@ Run as root on a Linux x86_64 VPS:
 x-ui exit-pool install
 ```
 
-The installer pins a reviewed xnvgatebox release and verifies the downloaded
-package. Systemd, TUN and network namespaces are required. Docker deployments
-are not supported by this helper.
+The installer pins a reviewed xnvgatebox release, its installer commit, and two
+independent SHA-256 values stored in 3x-ui. It refuses installation if either
+download differs from the reviewed artifacts. Systemd, TUN and network
+namespaces are required. Docker deployments are not supported by this helper.
 
 Use `x-ui exit-pool access` only when you need to change candidate countries,
 the number of exits, probe settings, or third-party SOCKS resources. Day-to-day
@@ -52,6 +53,13 @@ groups.
 The integration reads xnvgatebox only through its authenticated loopback API.
 SOCKS credentials are never returned to the browser.
 
+3x-ui fails closed if `listen_addr` is not exactly `127.0.0.1`. The embedded
+console cannot change xnvgatebox network settings or invoke its upstream online
+updater. A systemd drop-in also applies process hardening while retaining the
+network-namespace capabilities required to create exits. The management HTTP
+port must not be opened in UFW, firewalld, security groups, or provider firewall
+rules.
+
 ## Operations
 
 ```bash
@@ -60,6 +68,22 @@ x-ui exit-pool access
 x-ui exit-pool update
 x-ui exit-pool uninstall
 ```
+
+`x-ui exit-pool update` reinstalls the exact xnvgatebox build reviewed and
+pinned by the installed 3x-ui version. It deliberately does not follow a mutable
+"latest" release. Upgrade 3x-ui first when a newer reviewed exit-engine version
+is published, then run the command above.
+
+After installing or updating, verify the boundary with:
+
+```bash
+x-ui exit-pool secure
+systemctl is-active xnvgatebox-fanout.service
+sudo ss -lntp | grep xnvgatebox
+```
+
+The management listener should appear only on `127.0.0.1`, never `0.0.0.0` or
+`[::]`.
 
 Delete exit-pool subscription groups in the panel before uninstalling the exit
 engine. VPN Gate exits are operated by third parties, can disappear without

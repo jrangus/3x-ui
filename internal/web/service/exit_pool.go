@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -31,6 +33,8 @@ const (
 )
 
 var exitPoolSubIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{6,40}$`)
+
+const exitPoolMaxProxyBody = 8 << 20
 
 type ExitPoolService struct {
 	InboundService     InboundService
@@ -167,16 +171,35 @@ func readExitPoolFile(name string, limit int64) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+func validateExitPoolListenAddr(value string) error {
+	if strings.TrimSpace(value) != "127.0.0.1" {
+		return errors.New("xnvgatebox management listener is not loopback-only; run x-ui exit-pool secure")
+	}
+	return nil
+}
+
+func exitPoolConsoleOperationAllowed(method, requestPath string) bool {
+	if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+		return true
+	}
+	cleanPath := pathpkg.Clean("/" + strings.TrimLeft(requestPath, "/"))
+	return cleanPath != "/api/settings" && cleanPath != "/api/update/apply"
+}
+
 func newExitPoolHTTPClient(ctx context.Context, timeout time.Duration) (*http.Client, string, error) {
 	settingsRaw, err := readExitPoolFile("settings.json", 64<<10)
 	if err != nil {
 		return nil, "", err
 	}
 	var settings struct {
-		Port int `json:"port"`
+		Port       int    `json:"port"`
+		ListenAddr string `json:"listen_addr"`
 	}
 	if json.Unmarshal(settingsRaw, &settings) != nil || settings.Port < 1 || settings.Port > 65535 {
 		return nil, "", errors.New("invalid xnvgatebox settings")
+	}
+	if err := validateExitPoolListenAddr(settings.ListenAddr); err != nil {
+		return nil, "", err
 	}
 	baseRaw, err := readExitPoolFile("basepath", 4096)
 	if err != nil {
@@ -192,9 +215,25 @@ func newExitPoolHTTPClient(ctx context.Context, timeout time.Duration) (*http.Cl
 		return nil, "", errors.New("invalid xnvgatebox access files")
 	}
 
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Timeout: timeout, Jar: jar}
 	root := fmt.Sprintf("http://127.0.0.1:%d/%s", settings.Port, base)
+	expectedHost := fmt.Sprintf("127.0.0.1:%d", settings.Port)
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Timeout: timeout,
+		Jar:     jar,
+		Transport: &http.Transport{
+			Proxy:                 nil,
+			DialContext:           (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ResponseHeaderTimeout: 15 * time.Second,
+			IdleConnTimeout:       30 * time.Second,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "http" || req.URL.Host != expectedHost || len(via) > 5 {
+				return errors.New("refused xnvgatebox redirect outside loopback service")
+			}
+			return nil
+		},
+	}
 	form := url.Values{"password": {password}}
 	loginReq, err := http.NewRequestWithContext(ctx, http.MethodPost, root+"/login", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -261,19 +300,24 @@ func (s *ExitPoolService) loadExits() ([]ExitPoolExit, error) {
 // The upstream listener is expected to be loopback-only; its password and
 // session cookie are never sent to the browser.
 func (s *ExitPoolService) ProxyConsole(w http.ResponseWriter, r *http.Request, subPath, csrfToken string) error {
+	cleanPath := pathpkg.Clean("/" + strings.TrimLeft(subPath, "/"))
+	if !exitPoolConsoleOperationAllowed(r.Method, cleanPath) {
+		http.Error(w, "This operation is locked by 3x-ui security policy", http.StatusForbidden)
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 	client, root, err := newExitPoolHTTPClient(ctx, 2*time.Minute)
 	if err != nil {
 		return err
 	}
-	cleanPath := "/" + strings.TrimLeft(subPath, "/")
 	upstreamURL, err := url.Parse(root + cleanPath)
 	if err != nil {
 		return err
 	}
 	upstreamURL.RawQuery = r.URL.RawQuery
-	request, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), r.Body)
+	requestBody := http.MaxBytesReader(w, r.Body, exitPoolMaxProxyBody)
+	request, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), requestBody)
 	if err != nil {
 		return err
 	}
@@ -726,3 +770,4 @@ func (s *ExitPoolService) Delete(subID string) error {
 	}
 	return nil
 }
+
