@@ -1646,12 +1646,17 @@ _install_xui_service_unit() {
     return 0
 }
 
-# resolve_latest_tag prints the latest stable release tag. It prefers the web
-# releases/latest redirect, which is not subject to the unauthenticated API's
-# 60 req/h-per-IP limit that trips shared CI/CGNAT addresses (the install then
-# fails with "Failed to fetch x-ui version"), and falls back to the API.
+# resolve_latest_tag prefers this fork's rolling, security-hardened build. The
+# direct asset probe avoids GitHub's unauthenticated API rate limit. Stable is a
+# fallback only for repositories that have not published dev-latest yet.
 resolve_latest_tag() {
     local url tag
+    if curl -fsSLI --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 \
+        "https://github.com/jrangus/3x-ui/releases/download/dev-latest/x-ui-linux-$(arch).tar.gz" \
+        > /dev/null 2>&1; then
+        echo "dev-latest"
+        return 0
+    fi
     url=$(curl -sSLI -o /dev/null -w '%{url_effective}' --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://github.com/jrangus/3x-ui/releases/latest" 2>/dev/null)
     tag=${url##*/tag/}
     if [[ "$tag" != "$url" && -n "$tag" && "$tag" != "latest" ]]; then
@@ -1667,6 +1672,31 @@ resolve_latest_tag() {
     # returned by releases/latest, so fall back to it when it exists.
     tag=$(curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/jrangus/3x-ui/releases/tags/dev-latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     [[ "${tag}" == "dev-latest" ]] && echo "${tag}"
+}
+
+# Install the reviewed exit-pool companion as part of a normal 3x-ui install.
+# It remains opt-out for small or unsupported hosts, and it never opens a
+# public management port: x-ui exit-pool install enforces loopback listeners.
+install_integrated_exit_pool() {
+    if [[ "${XUI_INSTALL_EXIT_POOL:-1}" == "0" ]]; then
+        echo -e "${yellow}Skipping the integrated exit pool (XUI_INSTALL_EXIT_POOL=0).${plain}"
+        return 0
+    fi
+    if [[ "$(uname -m)" != "x86_64" ]] || ! command -v systemctl > /dev/null 2>&1; then
+        echo -e "${yellow}Integrated exit pool requires Linux x86_64 with systemd; 3x-ui itself is installed normally.${plain}"
+        return 0
+    fi
+
+    echo -e "${green}Installing the security-reviewed multi-country exit pool...${plain}"
+    if /usr/bin/x-ui exit-pool install; then
+        echo -e "${green}Integrated exit pool installation completed.${plain}"
+        return 0
+    fi
+
+    echo -e "${yellow}3x-ui is running, but the optional exit-pool component could not be installed.${plain}"
+    echo -e "${yellow}After correcting the reported dependency or network error, run: x-ui exit-pool install${plain}"
+    [[ "${XUI_REQUIRE_EXIT_POOL:-0}" == "1" ]] && return 1
+    return 0
 }
 
 # Releases publish <asset>.sha256 next to each archive. A mismatch or a failed
@@ -2036,6 +2066,10 @@ install_x-ui() {
     # works out of the box (no-op when XUI_ENABLE_FAIL2BAN=false). Never fatal.
     setup_fail2ban
 
+    # A single install now deploys both the panel and its integrated exit-pool
+    # companion. Existing nodes and routes are not changed by this operation.
+    install_integrated_exit_pool || exit 1
+
     echo -e "${green}x-ui ${tag_version}${plain} installation finished, it is running now..."
     echo -e ""
     echo -e "┌───────────────────────────────────────────────────────┐
@@ -2055,6 +2089,7 @@ install_x-ui() {
 │  ${blue}x-ui legacy${plain}       - Legacy version                   │
 │  ${blue}x-ui install${plain}      - Install                          │
 │  ${blue}x-ui uninstall${plain}    - Uninstall                        │
+│  ${blue}x-ui exit-pool status${plain} - Exit Pool Status             │
 └───────────────────────────────────────────────────────┘"
 }
 

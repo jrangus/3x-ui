@@ -128,8 +128,38 @@ before_show_menu() {
     show_menu
 }
 
+run_repository_script() {
+    local script_name="$1" temp_file rc ref version
+    shift
+    ref="${XUI_SCRIPT_REF:-main}"
+    if [[ -z "${XUI_SCRIPT_REF:-}" && -x "${xui_folder}/x-ui" ]]; then
+        version=$(${xui_folder}/x-ui -v 2> /dev/null || true)
+        case "$version" in
+            dev+[0-9a-fA-F]*) ref="${version#dev+}" ;;
+            [0-9]*.[0-9]*.[0-9]*) ref="v${version}" ;;
+            v[0-9]*.[0-9]*.[0-9]*) ref="${version}" ;;
+        esac
+    fi
+    temp_file=$(mktemp "/tmp/3x-ui-${script_name%.sh}.XXXXXX.sh") || return 1
+    if ! curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 \
+        "https://raw.githubusercontent.com/jrangus/3x-ui/${ref}/${script_name}" -o "$temp_file"; then
+        rm -f "$temp_file"
+        LOGE "Failed to download ${script_name} from jrangus/3x-ui (${ref})."
+        return 1
+    fi
+    if [[ "$(head -n 1 "$temp_file")" != '#!/bin/bash' ]] || ! bash -n "$temp_file"; then
+        rm -f "$temp_file"
+        LOGE "Downloaded ${script_name} is incomplete or invalid; nothing was executed."
+        return 1
+    fi
+    bash "$temp_file" "$@"
+    rc=$?
+    rm -f "$temp_file"
+    return "$rc"
+}
+
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/install.sh)
+    run_repository_script install.sh
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -148,7 +178,7 @@ update() {
         fi
         return 0
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/update.sh)
+    run_repository_script update.sh
     if [[ $? == 0 ]]; then
         LOGI "Update is complete, Panel has automatically restarted "
         before_show_menu
@@ -166,7 +196,7 @@ update_dev() {
     fi
     # XUI_UPDATE_TAG tells update.sh to install the dev-latest pre-release
     # instead of the latest stable tag.
-    XUI_UPDATE_TAG="dev-latest" bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/update.sh)
+    XUI_UPDATE_TAG="dev-latest" run_repository_script update.sh
     if [[ $? == 0 ]]; then
         LOGI "Dev update is complete, Panel has automatically restarted "
         before_show_menu
@@ -197,6 +227,12 @@ replace_xui_script() {
         return 1
     fi
 
+    if [[ "$(head -n 1 "$temp_file")" != '#!/bin/bash' ]] || ! bash -n "$temp_file"; then
+        rm -f "$temp_file"
+        LOGE "Downloaded x-ui.sh is incomplete or invalid; the installed CLI was not changed."
+        return 1
+    fi
+
     mv -f "$temp_file" /usr/bin/x-ui
     if [[ $? != 0 ]]; then
         rm -f "$temp_file"
@@ -213,7 +249,9 @@ replace_xui_script() {
 installed_script_url() {
     local ver
     ver=$("${xui_folder}/x-ui" -v 2> /dev/null | tr -d '[:space:]')
-    if [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && curl -fsIL -o /dev/null "https://raw.githubusercontent.com/jrangus/3x-ui/v${ver}/x-ui.sh"; then
+    if [[ "$ver" =~ ^dev\+([0-9a-fA-F]{7,40})$ ]]; then
+        echo "https://raw.githubusercontent.com/jrangus/3x-ui/${BASH_REMATCH[1]}/x-ui.sh"
+    elif [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && curl -fsIL -o /dev/null "https://raw.githubusercontent.com/jrangus/3x-ui/v${ver}/x-ui.sh"; then
         echo "https://raw.githubusercontent.com/jrangus/3x-ui/v${ver}/x-ui.sh"
     else
         echo -e "${yellow}No x-ui.sh published for the installed version (${ver:-unknown}), using main${plain}" >&2
@@ -246,15 +284,13 @@ legacy_version() {
     echo -n "Enter the panel version (like 2.4.0):"
     read -r tag_version
 
-    if [ -z "$tag_version" ]; then
-        echo "Panel version cannot be empty. Exiting."
-        exit 1
+    if [[ ! "$tag_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        LOGE "Invalid version. Expected a numeric semantic version such as 2.4.0."
+        return 1
     fi
-    # Use the entered panel version in the download link
-    install_command="bash <(curl -Ls "https://raw.githubusercontent.com/jrangus/3x-ui/v$tag_version/install.sh") v$tag_version"
 
     echo "Downloading and installing panel version $tag_version..."
-    eval $install_command
+    XUI_SCRIPT_REF="v${tag_version}" run_repository_script install.sh "v${tag_version}"
 }
 
 # Function to handle the deletion of the script file
@@ -4143,4 +4179,3 @@ if [[ $# > 0 ]]; then
 else
     show_menu
 fi
-

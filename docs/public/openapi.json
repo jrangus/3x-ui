@@ -4495,90 +4495,6 @@
         ],
         "type": "object"
       },
-      "Sponsor": {
-        "description": "Sponsor is one paid placement published in the repo's sponsors.json.",
-        "properties": {
-          "enable": {
-            "example": true,
-            "nullable": true,
-            "type": "boolean"
-          },
-          "from": {
-            "example": "2026-10-01T00:00:00Z",
-            "format": "date-time",
-            "nullable": true,
-            "type": "string"
-          },
-          "id": {
-            "example": "acme-2026-10",
-            "type": "string"
-          },
-          "link": {
-            "example": "https://acme.example/?utm_source=3x-ui",
-            "type": "string"
-          },
-          "logo": {
-            "example": "/sponsors/logo/acme.png",
-            "type": "string"
-          },
-          "name": {
-            "example": "Acme VPS",
-            "type": "string"
-          },
-          "slots": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "text": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "title": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "until": {
-            "example": "2026-11-01T00:00:00Z",
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "link",
-          "name",
-          "slots",
-          "text",
-          "title",
-          "until"
-        ],
-        "type": "object"
-      },
-      "SponsorList": {
-        "description": "SponsorList is the active sponsor set plus the contact link for new sponsors.",
-        "properties": {
-          "contact": {
-            "example": "https://t.me/example",
-            "type": "string"
-          },
-          "sponsors": {
-            "items": {
-              "$ref": "#/components/schemas/Sponsor"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "sponsors"
-        ],
-        "type": "object"
-      },
       "SubBalancer": {
         "description": "SubBalancer is one extra JSON-subscription config document whose members are\nthe selected inbounds' proxy outbounds. SortOrder shares SubSortIndex semantics.",
         "properties": {
@@ -4858,6 +4774,10 @@
       "description": "Manage scoped Bearer tokens for programmatic auth. Tokens grant admin, monitor, or node-sync access, may expire, and are stored as SHA-256 hashes. The plaintext is returned only once at creation."
     },
     {
+      "name": "Multi-country Exit Pool",
+      "description": "Create and maintain subscription groups whose client identities share one local VLESS, VMess, or Trojan inbound while routing through different xnvgatebox exits."
+    },
+    {
       "name": "Xray Settings",
       "description": "Xray configuration template, outbound management, Warp/Nord/PIA integration, and config testing. All endpoints under /panel/api/xray."
     },
@@ -5024,60 +4944,6 @@
                 "example": {
                   "success": true,
                   "obj": "csrf-token-string"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/sponsors": {
-      "get": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "Public. Active paid sponsor placements read from the project sponsors.json (cached for 1h); entries outside their from/until window are dropped. Logos are proxied by the panel at /sponsors/logo/{name}. Used by the login page and panel sponsor slots.",
-        "operationId": "get_sponsors",
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    },
-                    "obj": {
-                      "$ref": "#/components/schemas/SponsorList"
-                    }
-                  }
-                },
-                "example": {
-                  "success": true,
-                  "obj": {
-                    "contact": "https://t.me/example",
-                    "sponsors": [
-                      {
-                        "enable": true,
-                        "from": "2026-10-01T00:00:00Z",
-                        "id": "acme-2026-10",
-                        "link": "https://acme.example/?utm_source=3x-ui",
-                        "logo": "/sponsors/logo/acme.png",
-                        "name": "Acme VPS",
-                        "slots": [
-                          ""
-                        ],
-                        "text": {},
-                        "title": {},
-                        "until": "2026-11-01T00:00:00Z"
-                      }
-                    ]
-                  }
                 }
               }
             }
@@ -13449,6 +13315,127 @@
                 },
                 "example": {
                   "success": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/exit-pool": {
+      "get": {
+        "tags": [
+          "Multi-country Exit Pool"
+        ],
+        "summary": "Return installation state, ready regional exits, compatible local inbounds, and existing managed subscription groups.",
+        "operationId": "get_panel_api_exit_pool",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/exit-pool/sync": {
+      "post": {
+        "tags": [
+          "Multi-country Exit Pool"
+        ],
+        "summary": "Create a multi-region subscription group or synchronize the selected exits of an existing group.",
+        "operationId": "post_panel_api_exit_pool_sync",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "inboundId": 1,
+                "slots": [
+                  1,
+                  2,
+                  3
+                ],
+                "name": "Multi-region",
+                "subId": "pool-example"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/exit-pool/delete/{subId}": {
+      "post": {
+        "tags": [
+          "Multi-country Exit Pool"
+        ],
+        "summary": "Delete a managed subscription group together with its generated clients, routing rules, and unused managed outbounds.",
+        "operationId": "post_panel_api_exit_pool_delete_subId",
+        "parameters": [
+          {
+            "name": "subId",
+            "in": "path",
+            "required": true,
+            "description": "Managed exit-pool subscription ID.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
                 }
               }
             }

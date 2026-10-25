@@ -41,7 +41,9 @@ type PanelUpdateInfo struct {
 }
 
 const (
-	panelUpdaterURL      = "https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh"
+	panelRepository     = "jrangus/3x-ui"
+	panelRepositoryAPI  = "https://api.github.com/repos/" + panelRepository
+	panelRepositoryRaw  = "https://raw.githubusercontent.com/" + panelRepository
 	maxPanelUpdaterBytes = 2 << 20
 	// devReleaseTag is the fixed-tag rolling pre-release the CI force-moves to the
 	// newest main commit; the dev update channel installs from it.
@@ -147,11 +149,13 @@ func (s *PanelService) GetUpdateInfo() (*PanelUpdateInfo, error) {
 }
 
 // devChannelActive reports whether self-update should track the rolling dev
-// release. It is driven solely by the opt-in setting so the panel can
-// cross-grade a stable build onto the dev channel once the user enables it;
-// nothing updates without an explicit user action, so an unattended stable
-// binary with the toggle off stays on the stable channel.
+// release. A binary built from a commit must stay on that channel even when an
+// older database still contains devChannelEnable=false; otherwise a customized
+// build incorrectly compares itself with an unrelated stable release.
 func devChannelActive() bool {
+	if config.IsDevBuild() {
+		return true
+	}
 	enabled, err := (&service.SettingService{}).GetDevChannelEnable()
 	return err == nil && enabled
 }
@@ -237,6 +241,10 @@ func (s *PanelService) startUpdate(useDev bool) (int64, error) {
 	scriptPath, err := downloadPanelUpdater()
 	if err != nil {
 		return 0, err
+	}
+	if output, syntaxErr := exec.Command(bash, "-n", scriptPath).CombinedOutput(); syntaxErr != nil {
+		_ = os.Remove(scriptPath)
+		return 0, fmt.Errorf("downloaded panel updater failed syntax validation: %w: %s", syntaxErr, strings.TrimSpace(string(output)))
 	}
 
 	statusFile := config.GetUpdateStatusFilePath()
@@ -374,7 +382,7 @@ func releaseUpdateSlot() {
 
 func downloadPanelUpdater() (string, error) {
 	client := (&service.SettingService{}).NewProxiedHTTPClient(15 * time.Second)
-	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, panelUpdaterURL, nil)
+	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, panelUpdaterDownloadURL(), nil)
 	if reqErr != nil {
 		return "", fmt.Errorf("download panel updater: %w", reqErr)
 	}
@@ -417,6 +425,17 @@ func downloadPanelUpdater() (string, error) {
 	return path, nil
 }
 
+// panelUpdaterDownloadURL uses the immutable source revision of the running
+// binary. This avoids executing a mutable main-branch script as root from the
+// web updater. Stable builds fall back to their own version tag.
+func panelUpdaterDownloadURL() string {
+	ref := strings.TrimSpace(config.GetBuildCommit())
+	if !isCommitSHA(ref) {
+		ref = "v" + strings.TrimPrefix(config.GetBaseVersion(), "v")
+	}
+	return panelRepositoryRaw + "/" + ref + "/update.sh"
+}
+
 func fetchLatestPanelVersion() (string, error) {
 	release, err := fetchPanelRelease("")
 	if err != nil {
@@ -431,9 +450,9 @@ func fetchLatestPanelVersion() (string, error) {
 // fetchPanelRelease fetches a release from GitHub. An empty tag resolves the
 // latest stable release; a non-empty tag (e.g. dev-latest) resolves that tag.
 func fetchPanelRelease(tag string) (*service.Release, error) {
-	url := "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest"
+	url := panelRepositoryAPI + "/releases/latest"
 	if tag != "" {
-		url = "https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/" + tag
+		url = panelRepositoryAPI + "/releases/tags/" + tag
 	}
 	client := (&service.SettingService{}).NewProxiedHTTPClient(10 * time.Second)
 	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)

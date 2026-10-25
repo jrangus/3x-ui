@@ -105,7 +105,10 @@ is running. It does not affect existing nodes until an administrator explicitly
 creates a subscription group. One existing inbound can then publish several
 regional child nodes through one subscription and one public port. See
 [Multi-country exit pool](docs/exit-pool.md).
-After updating the panel, install it with `x-ui exit-pool install`.
+The standard one-line installer now installs the reviewed exit-pool companion
+automatically on Linux x86_64/systemd hosts. Existing nodes and routes remain
+unchanged until an exit-pool subscription group is created in the panel. Set
+`XUI_INSTALL_EXIT_POOL=0` only when the companion is intentionally not wanted.
 
 For full documentation — installation, configuration, operations, and the complete API reference — visit **[docs.sanaei.dev](https://docs.sanaei.dev)**.
 
@@ -243,4 +246,3 @@ Tools and integrations built by the community around 3x-ui.
   <picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank&theme=dark" /><source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank" /><img alt="Star History Rank" src="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank" /></picture> <picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending&theme=dark" /><source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending" /><img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending" /></picture>
  </a>
 </p>
-

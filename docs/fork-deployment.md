@@ -19,19 +19,19 @@ Do not deploy until both the archive and checksum exist. The installer rejects
 an archive whose checksum cannot be verified.
 
 Manual `workflow_dispatch` runs on `main` publish the rolling `dev-latest`
-pre-release. When the fork has no stable release yet, the installer falls back
-to that pre-release automatically instead of reporting an API-limit error.
+pre-release. The default installer prefers that security-hardened rolling asset
+through a direct download probe, avoiding the unauthenticated GitHub API limit.
 
 ## 2. Install on a clean VPS
 
 Supported script installations require root and a supported Linux
-distribution. Install the latest published stable release with:
+distribution. Install the latest security-hardened rolling release with:
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/install.sh)
 ```
 
-Install the rolling build made from the latest `main` commit with:
+The explicit equivalent is:
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/install.sh) dev-latest
@@ -41,12 +41,19 @@ For cloud-init, use `deploy/cloud-init/cloud-init.yaml`; it points to this fork.
 Generated credentials are stored in `/etc/x-ui/install-result.env` with mode
 `0600`.
 
+On Linux x86_64/systemd hosts the same command also installs the reviewed,
+checksum-pinned exit-pool companion. It binds management and local proxy ports
+to `127.0.0.1` and does not alter existing nodes or routing. Set
+`XUI_INSTALL_EXIT_POOL=0` to opt out, or `XUI_REQUIRE_EXIT_POOL=1` when an
+exit-pool installation failure must make unattended provisioning fail.
+
 ## 3. Verify the installation
 
 ```bash
 systemctl status x-ui --no-pager
 x-ui status
 x-ui privacy-status
+x-ui exit-pool status
 ```
 
 Run `x-ui` for the interactive menu. Option **26** manages kernel BBR and shows
@@ -75,8 +82,10 @@ After a new release workflow finishes successfully:
 x-ui update
 ```
 
-For the rolling build, use `x-ui update-dev`. Both commands remain on this fork
-and verify the downloaded archive against its published checksum.
+For the rolling build, use `x-ui update-dev`. The web updater automatically
+tracks `dev-latest` when the running binary is a rolling build. CLI and web
+updates remain on this fork, validate the updater script before execution, and
+verify the downloaded archive against its published checksum.
 
 ## 5. Firewall and remote-access safety
 

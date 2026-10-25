@@ -1,13 +1,15 @@
 # Multi-country exit subscription groups
 
 This optional integration combines 3x-ui with
-[`hanhaoops/xnvgatebox`](https://github.com/hanhaoops/xnvgatebox). It is disabled
-by default. Existing clients and routes remain unchanged until an administrator
-creates an exit-pool subscription group.
+[`hanhaoops/xnvgatebox`](https://github.com/hanhaoops/xnvgatebox). The companion
+is installed automatically on supported hosts, but it does not alter existing
+clients or routes until an administrator creates an exit-pool subscription group.
 
 ## Install the exit engine
 
-Run as root on a Linux x86_64 VPS:
+The normal 3x-ui one-line installer installs this component automatically on
+Linux x86_64/systemd hosts. For an existing installation, or to retry after a
+temporary network/dependency failure, run:
 
 ```bash
 x-ui exit-pool install
@@ -92,4 +94,3 @@ notice, and should not be trusted with sensitive unencrypted traffic.
 `xnvgatebox` is GPL-3.0-only and remains a separately distributed component.
 The helper downloads its pinned upstream release rather than embedding the
 binary in 3x-ui.
-

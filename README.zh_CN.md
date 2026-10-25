@@ -91,6 +91,11 @@ bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/main/install.sh)
 
 安装过程中会生成随机的用户名、密码和访问路径。安装完成后，运行 `x-ui` 打开管理菜单，您可以在其中启动/停止服务、查看或重置登录凭据、管理 SSL 证书等。
 
+在 Linux x86_64 且使用 systemd 的 VPS 上，这条命令还会自动安装经过固定版本和
+SHA-256 校验的多国出口池组件；不再需要先装面板、再单独运行一次脚本。安装组件
+不会修改已有节点或路由，只有在面板中创建出口池订阅组后才会生效。若明确不需要，
+可在安装前设置 `XUI_INSTALL_EXIT_POOL=0`。
+
 此分支的安装和更新仅从 `jrangus/3x-ui` 获取。首次部署前，请先在该仓库启用
 GitHub Actions 并运行发布工作流，确保 Releases 中已有相应架构的压缩包及
 `.sha256` 文件。不要换回上游安装地址，否则会安装不包含本分支 BBR、DNS
@@ -98,6 +103,9 @@ GitHub Actions 并运行发布工作流，确保 Releases 中已有相应架构�
 [当前分支部署说明](docs/fork-deployment.md)。
 
 每个发布资源都会在其旁边附带一个 `.sha256` 校验和。`install.sh` 和更新程序都会据此校验压缩包，不匹配时中止。
+
+此分支构建的面板只检查 `jrangus/3x-ui` 的更新；滚动构建会自动跟踪
+`dev-latest`，不会再提示安装上游版本。面板中的第三方赞助广告及其公网接口已移除。
 
 完整文档（安装、配置、运维以及完整的 API 参考）请访问 **[docs.sanaei.dev](https://docs.sanaei.dev/zh)**。
 
