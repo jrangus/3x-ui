@@ -3814,6 +3814,45 @@ EOF
     LOGI "xnvgatebox management is now loopback-only and available from the 3x-ui integrated console."
 }
 
+exit_pool_apply_candidate_overlay() {
+    local source_dir="${xui_folder}/exit-pool"
+    local target_dir="/usr/local/lib/xnvgatebox/src/vpngate_toolbox"
+    local name source target temporary
+
+    if [[ ! -d "$target_dir" ]]; then
+        LOGE "xnvgatebox Python runtime was not found. Install the exit pool first."
+        return 1
+    fi
+    for name in pool.py pool_history.py; do
+        source="${source_dir}/${name}"
+        target="${target_dir}/${name}"
+        if [[ ! -f "$source" || -L "$source" ]]; then
+            LOGE "The packaged exit-pool overlay is missing or unsafe: ${source}"
+            return 1
+        fi
+        if ! python3 - "$source" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+data = path.read_bytes()
+if len(data) < 100 or len(data) > 256_000:
+    raise SystemExit("invalid overlay size")
+compile(data, str(path), "exec")
+PY
+        then
+            LOGE "The packaged exit-pool overlay failed syntax validation: ${name}"
+            return 1
+        fi
+        temporary="${target}.xui-new"
+        rm -f -- "$temporary"
+        if ! install -m 0644 "$source" "$temporary" || ! mv -f -- "$temporary" "$target"; then
+            rm -f -- "$temporary"
+            LOGE "Failed to install the exit-pool candidate overlay: ${name}"
+            return 1
+        fi
+    done
+    LOGI "Enabled bounded 24-hour official candidate retention (live exit validation remains mandatory)."
+}
+
 exit_pool_install() (
     local version="v0.9.5"
     local installer_revision="d7b76f4fa4dc563808991a9ea84e4ae3baae5e69"
@@ -3863,6 +3902,7 @@ exit_pool_install() (
         LOGE "Multi-country exit pool installation failed."
         return "$rc"
     fi
+    exit_pool_apply_candidate_overlay || return 1
     exit_pool_secure || return 1
     LOGI "Multi-country exit pool installed. Existing 3x-ui routes are unchanged until you create an explicit binding."
     LOGI "Open 3x-ui -> Xray Settings -> Multi-country Exit Pool to manage it."
@@ -3886,6 +3926,12 @@ exit_pool_dispatch() {
             command -v xnvgatebox > /dev/null 2>&1 || { LOGE "Exit pool is not installed."; return 1; }
             exit_pool_secure
             ;;
+        optimize)
+            command -v xnvgatebox > /dev/null 2>&1 || { LOGE "Exit pool is not installed."; return 1; }
+            exit_pool_apply_candidate_overlay || return 1
+            systemctl start xnvgatebox-pool.service || return 1
+            LOGI "Candidate optimization installed. Refresh the integrated console after the pool job completes."
+            ;;
         status)
             if ! command -v xnvgatebox > /dev/null 2>&1; then
                 LOGI "Multi-country exit pool: not installed"
@@ -3900,7 +3946,7 @@ exit_pool_dispatch() {
             xnvgatebox uninstall
             ;;
         *)
-            LOGE "Usage: x-ui exit-pool {install|update|secure|status|uninstall}"
+            LOGE "Usage: x-ui exit-pool {install|update|optimize|secure|status|uninstall}"
             return 2
             ;;
     esac
@@ -3913,17 +3959,19 @@ ${green}Multi-country Exit Pool${plain}
   1. Install
   2. Restrict management to the 3x-ui integrated console
   3. Update
-  4. Status
-  5. Uninstall"
-    read -rp "Choose an option [0-5]: " choice
+  4. Apply candidate-pool optimization
+  5. Status
+  6. Uninstall"
+    read -rp "Choose an option [0-6]: " choice
     case "$choice" in
         0) show_menu ;;
         1) exit_pool_dispatch install; before_show_menu ;;
         2) exit_pool_dispatch access; before_show_menu ;;
         3) exit_pool_dispatch update; before_show_menu ;;
-        4) exit_pool_dispatch status; before_show_menu ;;
-        5) exit_pool_dispatch uninstall; before_show_menu ;;
-        *) LOGE "Please enter a number from 0 to 5"; exit_pool_menu ;;
+        4) exit_pool_dispatch optimize; before_show_menu ;;
+        5) exit_pool_dispatch status; before_show_menu ;;
+        6) exit_pool_dispatch uninstall; before_show_menu ;;
+        *) LOGE "Please enter a number from 0 to 6"; exit_pool_menu ;;
     esac
 }
 
@@ -3951,7 +3999,7 @@ show_usage() {
 │  ${blue}x-ui install${plain}               - Install                          │
 │  ${blue}x-ui uninstall${plain}             - Uninstall                        │
 └────────────────────────────────────────────────────────────────┘"
-    echo -e "  ${blue}x-ui exit-pool {install|update|secure|status|uninstall}${plain}"
+    echo -e "  ${blue}x-ui exit-pool {install|update|optimize|secure|status|uninstall}${plain}"
 }
 
 show_menu() {

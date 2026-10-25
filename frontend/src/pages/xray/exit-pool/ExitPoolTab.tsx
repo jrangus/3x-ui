@@ -76,6 +76,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
   const [name, setName] = useState('Multi-region');
   const [subId, setSubId] = useState('');
   const [exitSort, setExitSort] = useState<'region' | 'latency'>('region');
+  const [countryFilter, setCountryFilter] = useState('');
   const [showConsole, setShowConsole] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -124,6 +125,23 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
   const readyExits = useMemo(
     () => sortedExits.filter((exit) => exit.status === 'up'),
     [sortedExits],
+  );
+  const countryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    readyExits.forEach((exit) => {
+      const country = (exit.country || '').trim().toUpperCase();
+      if (country) counts.set(country, (counts.get(country) || 0) + 1);
+    });
+    return [...counts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([country, count]) => ({ value: country, label: `${country} (${count})` }));
+  }, [readyExits]);
+  const filteredReadyExits = useMemo(
+    () =>
+      countryFilter
+        ? readyExits.filter((exit) => exit.country.trim().toUpperCase() === countryFilter)
+        : readyExits,
+    [countryFilter, readyExits],
   );
   const orderedSlots = useMemo(() => {
     const rank = new Map(readyExits.map((exit, index) => [exit.slot, index]));
@@ -233,6 +251,17 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
             style={{ width: 210 }}
           />
           <Typography.Text type="secondary">此设置同时控制下方选择框和可用出口列表</Typography.Text>
+          <Typography.Text strong>实际出口国家：</Typography.Text>
+          <Select
+            aria-label="实际出口国家筛选"
+            allowClear
+            value={countryFilter || undefined}
+            placeholder="全部已验证国家"
+            onChange={(value) => setCountryFilter(value || '')}
+            options={countryOptions}
+            style={{ width: 180 }}
+          />
+          <Typography.Text type="secondary">按隧道实测国家筛选，不采用节点自报地区</Typography.Text>
         </Space>
         <Row gutter={[12, 12]}>
           <Col xs={24} lg={7}>
@@ -261,7 +290,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
               mode="multiple"
               value={orderedSlots}
               placeholder="选择多个国家或地区出口"
-              options={readyExits.map((exit) => ({
+              options={filteredReadyExits.map((exit) => ({
                 value: exit.slot,
                 label: `${exit.country || exit.region || 'Unknown'} · ${exit.exitIp || exit.host} · ${Math.round(exit.latencyMs || 0)}ms`,
               }))}
@@ -314,7 +343,13 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
           size="small"
           loading={loading}
           pagination={false}
-          dataSource={sortedExits}
+          dataSource={
+            countryFilter
+              ? sortedExits.filter(
+                  (exit) => exit.country.trim().toUpperCase() === countryFilter,
+                )
+              : sortedExits
+          }
           columns={[
             { title: '地区', render: (_, row: ExitRow) => row.country || row.region || '-' },
             { title: '出口 IP', dataIndex: 'exitIp' },

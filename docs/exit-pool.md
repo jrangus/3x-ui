@@ -38,14 +38,44 @@ Use `x-ui exit-pool access` only when you need to change candidate countries,
 the number of exits, probe settings, or third-party SOCKS resources. Day-to-day
 node assignment is performed in the 3x-ui panel.
 
+## Candidate-pool capacity and quality boundary
+
+The public source commonly contains only about 95–100 rows at one instant; the
+previous 96-result ceiling was therefore source supply, not a hard-coded limit.
+This candidate build keeps valid rows from recent official snapshots for up to
+24 hours. History is added only while the combined pool is below 512; a larger
+live official snapshot is never truncated. A retained row is accepted only when
+its OpenVPN profile is still a regular file under the pool directory and its
+path, size and SHA-256 digest all match. Custom sources and unverified mirror
+snapshots are never added to the rolling history.
+
+Retention increases the number of candidates, not the number of trusted exits.
+Every retained candidate is reset to `not_tested`; xnvgatebox must still create
+the tunnel and pass its existing live connectivity, actual exit-IP, country and
+policy checks before 3x-ui displays it as an available exit. Thus an offline
+historical row may fail and disappear, but it cannot silently become a usable
+lower-quality exit or fall back to the VPS address.
+
+After installing this candidate build, an existing exit-pool installation can
+apply the overlay and request an immediate pool refresh with:
+
+```bash
+sudo x-ui exit-pool optimize
+```
+
+Growth happens across changing official snapshots, so the first refresh can
+still show roughly the same count. Source metadata in `node_pool.json` records
+`current_candidates`, `retained_candidates`, and `candidate_total` separately.
+
 ## Create one subscription containing several regions
 
-1. In xnvgatebox, select the required countries and wait until their exits show
-   `up`.
+1. In xnvgatebox, create the required exits and wait until they show `up`.
 2. Open **Xray configuration → Multi-country exit pool** in 3x-ui.
-3. Choose one existing local VLESS, VMess or Trojan inbound as the mother node.
-4. Select several ready regional exits, enter a group name, and click **Create**.
-5. Open the 3x-ui **Clients** page, search for the displayed subscription ID,
+3. Use **Actual exit country** to filter by the country measured through the
+   running tunnel. This does not rely on the server's advertised country.
+4. Choose one existing local VLESS, VMess or Trojan inbound as the mother node.
+5. Select several ready regional exits, enter a group name, and click **Create**.
+6. Open the 3x-ui **Clients** page, search for the displayed subscription ID,
    and copy its subscription URL.
 
 3x-ui creates one dedicated client identity per selected region inside the same
@@ -82,6 +112,7 @@ rules.
 x-ui exit-pool status
 x-ui exit-pool access
 x-ui exit-pool update
+x-ui exit-pool optimize
 x-ui exit-pool uninstall
 ```
 
@@ -108,4 +139,3 @@ notice, and should not be trusted with sensitive unencrypted traffic.
 `xnvgatebox` is GPL-3.0-only and remains a separately distributed component.
 The helper downloads its pinned upstream release rather than embedding the
 binary in 3x-ui.
-

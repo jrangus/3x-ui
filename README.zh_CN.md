@@ -96,6 +96,35 @@ SHA-256 校验的多国出口池组件；不再需要先装面板、再单独运
 不会修改已有节点或路由，只有在面板中创建出口池订阅组后才会生效。若明确不需要，
 可在安装前设置 `XUI_INSTALL_EXIT_POOL=0`。
 
+### xnvgatebox 候选池扩容版（独立候选版本）
+
+本次候选池优化不会覆盖 `main`、`dev-latest` 或现有稳定版，而是在独立分支和
+`v3.7.0-xnvgatebox-pool.1` 预发布版本中验证。VPN Gate 当前公开快照通常只有
+约 95–100 条，因此原先看到的 96 不是程序限制。候选版会滚动保留最近 24 小时内
+官方快照中出现过、且配置路径、文件大小和 SHA-256 都一致的候选；历史记录只会把
+合计数量补到 512，若当前官方快照本身超过 512 则不会截断。自定义来源和未通过
+完整性校验的镜像不会进入历史池。
+
+“候选更多”不等于直接信任更多 IP。历史候选会被重置为未检测状态，仍须通过原有
+OpenVPN 建连、真实出口 IP、实际国家及策略验证，才能在 3X-UI 中成为可选出口；
+失败时不会回落到 VPS 本机 IP。国家筛选也以隧道实测国家为准，不再用节点自报地区。
+
+候选预发布构建完成后，新 VPS 可显式安装该版本（不带版本参数仍安装原版本）：
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/jrangus/3x-ui/xnvgatebox-pool-v2/install.sh) v3.7.0-xnvgatebox-pool.1
+```
+
+已有 VPS 安装候选版后，可执行一次：
+
+```bash
+sudo x-ui exit-pool optimize
+```
+
+首次刷新数量可能仍接近 96，只有官方快照发生变化后才会逐步累积；这避免为了追求
+数字而引入来源不明的公开代理。详细质量边界见
+[多国出口池说明](docs/exit-pool.md)。
+
 ### 磁盘空间、首次启动与升级
 
 建议新 VPS 在安装前至少保留 **1.5 GB** 可用空间；仅更新已有安装时至少保留
@@ -295,4 +324,3 @@ English · فارسی · العربية · 中文（简体） · 中文（繁體
   <picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank&theme=dark" /><source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank" /><img alt="Star History Rank" src="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank" /></picture> <picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending&theme=dark" /><source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending" /><img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending" /></picture>
  </a>
 </p>
-

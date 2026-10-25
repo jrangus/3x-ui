@@ -14,6 +14,7 @@ on:
       - "go.mod"
       - "go.sum"
       - "**.sh"
+      - "deploy/xnvgatebox/**"
       - "frontend/**"
       - "x-ui.service.debian"
       - "x-ui.service.arch"
@@ -21,7 +22,19 @@ on:
       - ".github/workflows/release.yml"
 
 jobs:
+  validate-exit-pool-overlay:
+    name: Validate exit-pool overlay
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Validate scripts and retention boundaries
+        run: |
+          bash -n x-ui.sh
+          python3 -m unittest discover -s deploy/xnvgatebox -p 'test_*.py' -v
+
   build:
+    needs: validate-exit-pool-overlay
     permissions:
       contents: write
     strategy:
@@ -47,7 +60,7 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      # Frontend dist must be built BEFORE go build 鈥?Go's //go:embed
+      # Frontend dist must be built BEFORE go build — Go's //go:embed
       # all:dist directive in internal/web/web.go requires internal/web/dist/ to exist
       # at compile time. internal/web/dist/ is .gitignored, so on a fresh CI
       # checkout it doesn't exist until vite emits it.
@@ -110,6 +123,9 @@ jobs:
           cp x-ui.service.arch x-ui/
           cp x-ui.service.rhel x-ui/
           cp x-ui.sh x-ui/
+          mkdir -p x-ui/exit-pool
+          cp deploy/xnvgatebox/pool.py x-ui/exit-pool/
+          cp deploy/xnvgatebox/pool_history.py x-ui/exit-pool/
           mv x-ui/xui-release x-ui/x-ui
           mkdir x-ui/bin
           cd x-ui/bin
@@ -161,10 +177,10 @@ jobs:
           mv xray xray-linux-${{ matrix.platform }}
           # mtg-multi (MTProto sidecar) ships prebuilt release binaries whose
           # platform labels match our matrix, so download and unpack the matching
-          # archive. Only the platforms the fork publishes are packaged 鈥?the tag
+          # archive. Only the platforms the fork publishes are packaged — the tag
           # lookup lives inside that branch so unpackaged platforms (s390x) never
           # depend on it. The tag comes from the release-page redirect on
-          # github.com 鈥?the host the downloads need anyway 鈥?because api.github.com
+          # github.com — the host the downloads need anyway — because api.github.com
           # has 503'd whole release runs while asset downloads kept working.
           case "${{ matrix.platform }}" in
             amd64|arm64|armv7|armv6|386)
@@ -208,6 +224,7 @@ jobs:
   # =================================
   build-windows:
     name: Build for Windows
+    needs: validate-exit-pool-overlay
     permissions:
       contents: write
     strategy:
@@ -225,7 +242,7 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      # Frontend dist must be built BEFORE go build 鈥?see comment on the
+      # Frontend dist must be built BEFORE go build — see comment on the
       # Linux job above. This step is identical except npm runs on the
       # Windows runner here.
       - name: Setup Node.js
@@ -302,7 +319,7 @@ jobs:
 
           # mtg-multi (MTProto sidecar) publishes a prebuilt Windows binary, so
           # download and unpack it instead of compiling. The tag comes from the
-          # release-page redirect on github.com 鈥?not api.github.com, whose
+          # release-page redirect on github.com — not api.github.com, whose
           # outages have failed release runs while asset downloads kept working.
           $MTG_MULTI_VER = (curl.exe -sf --retry 5 --retry-all-errors --retry-delay 3 -o NUL -w '%{redirect_url}' "https://github.com/mhsanaei/mtg-multi/releases/latest") -replace '^.*/releases/tag/', ''
           if (-not $MTG_MULTI_VER -or $MTG_MULTI_VER -notmatch '^v[\d.]+$') { throw "could not resolve the latest mtg-multi release tag" }
@@ -390,7 +407,7 @@ jobs:
             return 1
           }
           short="${COMMIT::8}"
-          notes="Rolling development build 鈥?installs via the panel's Dev update channel.
+          notes="Rolling development build — installs via the panel's Dev update channel.
 
           commit=${COMMIT}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -410,4 +427,3 @@ jobs:
           fi
 
           retry gh release upload dev-latest dev-artifacts/*.tar.gz dev-artifacts/*.zip dev-artifacts/*.sha256 --clobber
-
