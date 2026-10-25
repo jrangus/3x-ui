@@ -20,6 +20,20 @@ independent SHA-256 values stored in 3x-ui. It refuses installation if either
 download differs from the reviewed artifacts. Systemd, TUN and network
 namespaces are required. Docker deployments are not supported by this helper.
 
+Keep at least 1.5 GB free for a new combined installation, or 1 GB for an
+in-place upgrade. Typical final amd64 disk use is about 250–350 MB for 3X-UI
+plus 100–250 MB for xnvgatebox and its Ubuntu/Debian dependencies. Temporary
+downloads, extraction, package caches, logs and databases require additional
+headroom; CentOS can require more while compiling its SSTP package.
+
+Installation does not loop. The upstream installer takes an exclusive file
+lock, and 3X-UI restarts the exit service once after installation to apply its
+loopback and systemd hardening. Messages such as `restoring tunnels`, failed
+candidate probes and exit replacement are runtime health checks. They can
+continue for a while when dozens of slots already exist, but they do not mean
+the installer is running again. Do not rerun `install` or `secure` in response
+to those messages.
+
 Use `x-ui exit-pool access` only when you need to change candidate countries,
 the number of exits, probe settings, or third-party SOCKS resources. Day-to-day
 node assignment is performed in the 3x-ui panel.
@@ -94,3 +108,4 @@ notice, and should not be trusted with sensitive unencrypted traffic.
 `xnvgatebox` is GPL-3.0-only and remains a separately distributed component.
 The helper downloads its pinned upstream release rather than embedding the
 binary in 3x-ui.
+
