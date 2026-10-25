@@ -96,6 +96,58 @@ SHA-256 校验的多国出口池组件；不再需要先装面板、再单独运
 不会修改已有节点或路由，只有在面板中创建出口池订阅组后才会生效。若明确不需要，
 可在安装前设置 `XUI_INSTALL_EXIT_POOL=0`。
 
+### 磁盘空间、首次启动与升级
+
+建议新 VPS 在安装前至少保留 **1.5 GB** 可用空间；仅更新已有安装时至少保留
+**1 GB**。这是包含下载包、解压临时文件、系统依赖和软件包缓存的保守余量，不是
+安装后固定占用量。典型 amd64 部署完成后，3X-UI 约占 250–350 MB；出口池程序及
+Ubuntu/Debian 所需依赖通常再占 100–250 MB。数据库、日志、证书和系统本身不包含
+在这些估算中，CentOS 首次本地编译 SSTP 依赖时还需要更多临时空间。
+
+安装器不会循环安装：出口池安装器使用文件锁，同一时间只允许一个安装或更新任务。
+首次安装会启动服务，3X-UI 随后应用安全策略并重启出口服务一次。之后看到的
+“拉取节点”“恢复隧道”“探测失败”或“换节点”是公开出口的运行期健康检查，并非
+重新安装。全新 VPS 尚未创建出口组时不会恢复旧 VPS 的几十条出口；升级现有 VPS
+则会按原配置恢复已有出口，出口越多，恢复日志持续时间越长。不要因为这些日志重复
+运行 `x-ui exit-pool install` 或 `x-ui exit-pool secure`。
+
+升级前先确认根分区空间：
+
+```bash
+df -h /
+```
+
+从原版或本分支旧版本升级到当前滚动版本时，下面的命令必须**逐行执行**，不要粘成
+一行：
+
+```bash
+sudo cp -a /etc/x-ui/x-ui.db /etc/x-ui/x-ui.db.before-upgrade
+
+curl --connect-timeout 10 --max-time 120 --retry 3 -fL \
+  'https://raw.githubusercontent.com/jrangus/3x-ui/main/x-ui.sh' \
+  -o /tmp/x-ui.sh
+
+test "$(head -n 1 /tmp/x-ui.sh)" = '#!/bin/bash'
+bash -n /tmp/x-ui.sh
+sudo install -m 755 /tmp/x-ui.sh /usr/bin/x-ui
+
+sudo env XUI_SCRIPT_REF=main x-ui update-dev
+sudo x-ui exit-pool update
+```
+
+最后一条仅用于已安装出口池的 VPS；如果提示 `Exit pool is not installed`，改为执行
+`sudo x-ui exit-pool install`。升级会保留面板数据库、证书和出口池配置。完成后只需
+检查一次：
+
+```bash
+/usr/local/x-ui/x-ui -v
+sudo systemctl is-active x-ui xnvgatebox-fanout.service xnvgatebox-pool.timer
+sudo ss -lntp | grep xnvgatebox
+```
+
+`xnvgatebox` 的所有监听地址都应为 `127.0.0.1`。不要在 VPS 防火墙、云安全组或
+服务器厂商防火墙中放行 `8899` 和 `17928-17999`。
+
 此分支的安装和更新仅从 `jrangus/3x-ui` 获取。首次部署前，请先在该仓库启用
 GitHub Actions 并运行发布工作流，确保 Releases 中已有相应架构的压缩包及
 `.sha256` 文件。不要换回上游安装地址，否则会安装不包含本分支 BBR、DNS
@@ -243,3 +295,4 @@ English · فارسی · العربية · 中文（简体） · 中文（繁體
   <picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank&theme=dark" /><source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank" /><img alt="Star History Rank" src="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=rank" /></picture> <picture><source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending&theme=dark" /><source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending" /><img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=MHSanaei/3x-ui&type=trending" /></picture>
  </a>
 </p>
+
