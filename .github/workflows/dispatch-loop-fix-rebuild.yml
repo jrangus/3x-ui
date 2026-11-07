@@ -1,4 +1,5 @@
 name: Dispatch loop-fix rebuild
+# authorized one-shot trigger
 
 on:
   pull_request:
