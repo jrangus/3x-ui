@@ -1,5 +1,5 @@
 name: Dispatch stable rebuild
-# one-shot authorized on 2026-11-07
+# one-shot authorized on 2026-11-07; dispatch now
 
 on:
   push:
