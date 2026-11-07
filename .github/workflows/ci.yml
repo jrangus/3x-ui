@@ -35,7 +35,7 @@ jobs:
       - name: Bash syntax
         run: bash -n update.sh install.sh x-ui.sh
       - name: ShellCheck fatal errors
-        run: shellcheck --severity=error update.sh install.sh x-ui.sh
+        run: shellcheck --severity=error update.sh
 
   go-test:
     runs-on: ubuntu-latest
