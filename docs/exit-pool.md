@@ -48,6 +48,27 @@ node assignment is performed in the 3x-ui panel.
 5. Open the 3x-ui **Clients** page, search for the displayed subscription ID,
    and copy its subscription URL.
 
+## Exit source isolation
+
+The panel treats the source as a routing boundary, not merely as a display
+label. Existing reviewed xnvgatebox exits always remain in **xnvgatebox stable
+pool**. Optional providers are kept in separate **new residential** and **new
+native datacenter** pools. The stable pool is selected by default when creating
+or editing a group.
+
+An old group created before source isolation is automatically interpreted as a
+stable-pool group; no database rewrite is required. New residential exits are
+rejected unless xnvgatebox supplies current `strict_residential` or
+`likely_residential` evidence. New native datacenter exits are rejected unless
+both the native-country check and the datacenter/business-ISP classification
+are present. Unknown, expired or mismatched evidence is never promoted into
+either optional pool.
+
+Disabling or removing an optional provider does not delete stable exits, stable
+groups, ordinary inbounds, clients or routes. A group can deliberately combine
+categories, but its members retain their source category so the distinction is
+visible later.
+
 3x-ui creates one dedicated client identity per selected region inside the same
 inbound. Those identities share one `subId`, so one subscription contains
 separate US, JP, SG, or other regional entries while they all use the mother
@@ -108,4 +129,5 @@ notice, and should not be trusted with sensitive unencrypted traffic.
 `xnvgatebox` is GPL-3.0-only and remains a separately distributed component.
 The helper downloads its pinned upstream release rather than embedding the
 binary in 3x-ui.
+
 
