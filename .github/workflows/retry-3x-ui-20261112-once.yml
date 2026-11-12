@@ -1,0 +1,16 @@
+name: Retry 3x-ui-20261112 once
+on:
+  push:
+    paths:
+      - .github/workflows/retry-3x-ui-20261112-once.yml
+permissions:
+  actions: write
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run release.yml --ref main -f source_ref=c54099ba10df9965d8dbcaac74197534e2343a35 -f release_tag=3x-ui-20261112
