@@ -1,14 +1,16 @@
 name: Recover 3x-ui-20261112 once
-# Triggered through the GitHub Contents API after the zero-job run became stuck.
+
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/recover-3x-ui-20261112-once.yml']
+  issues:
+    types: [opened]
+
 permissions:
   actions: write
   contents: write
+
 jobs:
   recover:
+    if: github.event.issue.title == 'release-3x-ui-20261112'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -17,13 +19,18 @@ jobs:
       SOURCE_SHA: c54099ba10df9965d8dbcaac74197534e2343a35
       RELEASE_TAG: 3x-ui-20261112
     steps:
-      - name: Cancel stuck run and create one dated release tag
+      - name: Cancel stale run and dispatch clean release
         run: |
           set -euo pipefail
           gh run cancel 43126002363 || true
-          for attempt in $(seq 1 20); do
+          for attempt in $(seq 1 30); do
             status="$(gh run view 43126002363 --json status --jq .status)"
             [[ "$status" == "completed" ]] && break
-            sleep 3
+            sleep 2
           done
-          gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --draft --title "$RELEASE_TAG" --notes "Separates xnvgatebox stable, new residential and new native-datacenter exits; prevents mixed-source groups; disables unusable loopback subscriptions in embedded mode; records exact candidate source. Pins tested xnvgatebox v0.9.10. dev-latest and dev-6d205a91-backup remain unchanged."
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --draft --target "$SOURCE_SHA" --title "$RELEASE_TAG"
+          else
+            gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --draft --title "$RELEASE_TAG" --notes "Separates xnvgatebox stable, new residential and new native-datacenter exits; prevents mixed-source groups; disables unusable loopback subscriptions in embedded mode; records exact candidate source. Pins tested xnvgatebox v0.9.10. dev+6d205a91 remains preserved under dev-6d205a91-backup."
+          fi
+          gh workflow run release.yml --ref main -f source_ref="$SOURCE_SHA" -f release_tag="$RELEASE_TAG"
