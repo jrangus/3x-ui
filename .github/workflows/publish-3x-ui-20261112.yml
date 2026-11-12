@@ -1,0 +1,21 @@
+name: Publish 3x-ui-20261112
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start verified release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref release-3x-ui-20261112-source \
+            -f source_ref=c54099ba10df9965d8dbcaac74197534e2343a35 \
+            -f release_tag=3x-ui-20261112
