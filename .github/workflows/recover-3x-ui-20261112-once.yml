@@ -1,0 +1,28 @@
+name: Recover 3x-ui-20261112 once
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/recover-3x-ui-20261112-once.yml']
+permissions:
+  actions: write
+  contents: write
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: c54099ba10df9965d8dbcaac74197534e2343a35
+      RELEASE_TAG: 3x-ui-20261112
+    steps:
+      - name: Cancel stuck run and create one dated release tag
+        run: |
+          set -euo pipefail
+          gh run cancel 43126002363 || true
+          for attempt in $(seq 1 20); do
+            status="$(gh run view 43126002363 --json status --jq .status)"
+            [[ "$status" == "completed" ]] && break
+            sleep 3
+          done
+          gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --draft --title "$RELEASE_TAG" --notes "Separates xnvgatebox stable, new residential and new native-datacenter exits; prevents mixed-source groups; disables unusable loopback subscriptions in embedded mode; records exact candidate source. Pins tested xnvgatebox v0.9.10. dev-latest and dev-6d205a91-backup remain unchanged."
