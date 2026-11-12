@@ -51,6 +51,18 @@ jobs:
         with:
           ref: ${{ inputs.source_ref || github.ref }}
 
+      - name: Preserve verified installer source
+        run: |
+          set -euo pipefail
+          test "$(head -n 1 x-ui.sh)" = '#!/bin/bash'
+          bash -n x-ui.sh
+          install -m 0444 x-ui.sh "$RUNNER_TEMP/x-ui.sh.source"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum x-ui.sh.source > x-ui.sh.source.sha256
+            sha256sum -c x-ui.sh.source.sha256
+          )
+
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
@@ -124,13 +136,16 @@ jobs:
           cp x-ui.service.debian x-ui/
           cp x-ui.service.arch x-ui/
           cp x-ui.service.rhel x-ui/
-          # Materialize the installer from the immutable Git object after all build steps.
-          # Never package a working-tree copy: a prior release produced an equal-length
-          # binary-corrupted x-ui.sh even though the committed blob was valid text.
-          git show HEAD:x-ui.sh > x-ui/x-ui.sh
-          chmod 0755 x-ui/x-ui.sh
+          # Restore the installer from the isolated copy captured immediately
+          # after checkout, before npm, Go or downloaded toolchains can touch it.
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum -c x-ui.sh.source.sha256
+          )
+          install -m 0755 "$RUNNER_TEMP/x-ui.sh.source" x-ui/x-ui.sh
           test "$(head -n 1 x-ui/x-ui.sh)" = '#!/bin/bash'
           bash -n x-ui/x-ui.sh
+          cmp x-ui/x-ui.sh "$RUNNER_TEMP/x-ui.sh.source"
           mv x-ui/xui-release x-ui/x-ui
           mkdir x-ui/bin
           cd x-ui/bin
@@ -207,11 +222,11 @@ jobs:
           # script corruption a hard build failure instead of a broken release.
           test "$(head -n 1 x-ui/x-ui.sh)" = '#!/bin/bash'
           bash -n x-ui/x-ui.sh
-          cmp x-ui/x-ui.sh <(git show HEAD:x-ui.sh)
+          cmp x-ui/x-ui.sh "$RUNNER_TEMP/x-ui.sh.source"
           tar -zcvf x-ui-linux-${{ matrix.platform }}.tar.gz x-ui
           test "$(tar -xOzf x-ui-linux-${{ matrix.platform }}.tar.gz x-ui/x-ui.sh | head -n 1)" = '#!/bin/bash'
           tar -xOzf x-ui-linux-${{ matrix.platform }}.tar.gz x-ui/x-ui.sh | bash -n
-          tar -xOzf x-ui-linux-${{ matrix.platform }}.tar.gz x-ui/x-ui.sh | cmp - <(git show HEAD:x-ui.sh)
+          tar -xOzf x-ui-linux-${{ matrix.platform }}.tar.gz x-ui/x-ui.sh | cmp - "$RUNNER_TEMP/x-ui.sh.source"
           sha256sum x-ui-linux-${{ matrix.platform }}.tar.gz > x-ui-linux-${{ matrix.platform }}.tar.gz.sha256
 
       - name: Upload files to Artifacts
