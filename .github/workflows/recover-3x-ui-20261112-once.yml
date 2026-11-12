@@ -1,4 +1,5 @@
 name: Recover 3x-ui-20261112 once
+# Triggered through the GitHub Contents API after the zero-job run became stuck.
 on:
   push:
     branches: [main]
