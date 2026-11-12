@@ -1,0 +1,23 @@
+name: Repair 3x-ui-20261112 source tag
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Move release tag to verified source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method PATCH             "repos/$GITHUB_REPOSITORY/git/refs/tags/3x-ui-20261112"             -f sha=117743bcd626945cc96a5445f6de20f762e922cb             -F force=true
+
+      - name: Verify tagged management script
+        run: |
+          curl -fsSL --retry 3             "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/3x-ui-20261112/x-ui.sh"             -o /tmp/x-ui.sh
+          test "$(head -n 1 /tmp/x-ui.sh)" = '#!/bin/bash'
+          bash -n /tmp/x-ui.sh
