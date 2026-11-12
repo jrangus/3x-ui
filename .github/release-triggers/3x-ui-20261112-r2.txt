@@ -1,0 +1,2 @@
+One-time release recovery trigger for 3x-ui-20261112.
+Source: c54099ba10df9965d8dbcaac74197534e2343a35
