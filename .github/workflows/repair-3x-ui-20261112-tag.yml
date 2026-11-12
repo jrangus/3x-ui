@@ -14,10 +14,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --method PATCH             "repos/$GITHUB_REPOSITORY/git/refs/tags/3x-ui-20261112"             -f sha=117743bcd626945cc96a5445f6de20f762e922cb             -F force=true
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/git/refs/tags/3x-ui-20261112" \
+            -f sha=92647d7d881d642b3a5e5302bee7c46d75f4175b \
+            -F force=true
 
       - name: Verify tagged management script
         run: |
-          curl -fsSL --retry 3             "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/3x-ui-20261112/x-ui.sh"             -o /tmp/x-ui.sh
+          curl -fsSL --retry 3 \
+            "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/3x-ui-20261112/x-ui.sh" \
+            -o /tmp/x-ui.sh
           test "$(head -n 1 /tmp/x-ui.sh)" = '#!/bin/bash'
+          grep -q 'local version="v0.9.11"' /tmp/x-ui.sh
           bash -n /tmp/x-ui.sh
