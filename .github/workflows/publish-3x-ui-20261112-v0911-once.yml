@@ -1,0 +1,55 @@
+name: Publish 3x-ui-20261112 v0.9.11 integration once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-3x-ui-20261112-v0911-once.yml
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: 92647d7d881d642b3a5e5302bee7c46d75f4175b
+      RELEASE_TAG: 3x-ui-20261112
+    steps:
+      - name: Build, publish, and align source tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --ref release-3x-ui-20261112-source \
+            -f source_ref="$SOURCE_SHA" \
+            -f release_tag="$RELEASE_TAG"
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(gh run list --workflow release.yml --event workflow_dispatch \
+              --branch release-3x-ui-20261112-source --limit 20 \
+              --json databaseId,headSha \
+              --jq '.[] | select(.headSha == env.SOURCE_SHA) | .databaseId' | head -n 1)"
+            [[ -n "$run_id" ]] && break
+            sleep 2
+          done
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          echo "RELEASE_RUN_ID=$run_id"
+          gh run watch "$run_id" --exit-status
+
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" \
+            -f sha="$SOURCE_SHA" \
+            -F force=true
+
+          curl -fsSL --retry 3 \
+            "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$RELEASE_TAG/x-ui.sh" \
+            -o /tmp/x-ui.sh
+          test "$(head -n 1 /tmp/x-ui.sh)" = '#!/bin/bash'
+          grep -q 'local version="v0.9.11"' /tmp/x-ui.sh
+          bash -n /tmp/x-ui.sh
