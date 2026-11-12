@@ -1,7 +1,7 @@
 name: Recover 3x-ui-20261112 once
 
 on:
-  issues:
+  pull_request_target:
     types: [opened]
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   recover:
-    if: github.event.issue.title == 'release-3x-ui-20261112'
+    if: github.event.pull_request.title == 'release-3x-ui-20261112'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
