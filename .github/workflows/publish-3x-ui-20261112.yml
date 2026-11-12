@@ -17,5 +17,5 @@ jobs:
           gh workflow run release.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref release-3x-ui-20261112-source \
-            -f source_ref=ed887e45efb3a42d6b4131f4aef4aa2a3adec201 \
+            -f source_ref=996040f4837405648e955322f959a9cbf185a97b \
             -f release_tag=3x-ui-20261112
