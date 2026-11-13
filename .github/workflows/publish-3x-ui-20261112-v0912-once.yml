@@ -1,0 +1,92 @@
+name: Publish 3x-ui-20261112 v0.9.12 integration once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-3x-ui-20261112-v0912-once.yml
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: 3x-ui-20261112
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release-3x-ui-20261112-source
+          fetch-depth: 0
+
+      - name: Pin tested xnvgatebox v0.9.12
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("x-ui.sh")
+          text = p.read_text()
+          replacements = {
+              'local version="v0.9.11"': 'local version="v0.9.12"',
+              'local installer_revision="aa3c7bac807c4a11e1236389e40eb7bb1a61fc6a"': 'local installer_revision="4cbabf76a76980d21bb49446a97039448babd42f"',
+              'local package_sha256="85030bfbe34de24966815853ad2fffaed04cd573ced4c39801b468d9a921a40c"': 'local package_sha256="226007e354c0df20e2ce0cecd8dc372c64699800ffbb94d75460e6eb1bf2f41a"',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected exactly one occurrence: {old}")
+              text = text.replace(old, new)
+          p.write_text(text)
+          PY
+          bash -n x-ui.sh
+          grep -q 'local version="v0.9.12"' x-ui.sh
+          grep -q 'local installer_revision="4cbabf76a76980d21bb49446a97039448babd42f"' x-ui.sh
+          grep -q 'local installer_sha256="b0815ea91bb005f7b8c9614dd669cb1da399545b6242c72ac914c572293fd6f3"' x-ui.sh
+          grep -q 'local package_sha256="226007e354c0df20e2ce0cecd8dc372c64699800ffbb94d75460e6eb1bf2f41a"' x-ui.sh
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add x-ui.sh
+          git commit -m 'fix: integrate xnvgatebox v0.9.12'
+          git push origin HEAD:release-3x-ui-20261112-source
+          echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Build, publish, and align source tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --ref release-3x-ui-20261112-source \
+            -f source_ref="$SOURCE_SHA" \
+            -f release_tag="$RELEASE_TAG"
+
+          run_id=""
+          for _ in $(seq 1 40); do
+            run_id="$(gh run list --workflow release.yml --event workflow_dispatch \
+              --branch release-3x-ui-20261112-source --limit 30 \
+              --json databaseId,headSha \
+              --jq '.[] | select(.headSha == env.SOURCE_SHA) | .databaseId' | head -n 1)"
+            [[ -n "$run_id" ]] && break
+            sleep 3
+          done
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          echo "RELEASE_RUN_ID=$run_id"
+          gh run watch "$run_id" --exit-status
+
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" \
+            -f sha="$SOURCE_SHA" \
+            -F force=true
+
+          curl -fsSL --retry 3 \
+            "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$RELEASE_TAG/x-ui.sh" \
+            -o /tmp/x-ui.sh
+          test "$(head -n 1 /tmp/x-ui.sh)" = '#!/bin/bash'
+          grep -q 'local version="v0.9.12"' /tmp/x-ui.sh
+          grep -q 'local package_sha256="226007e354c0df20e2ce0cecd8dc372c64699800ffbb94d75460e6eb1bf2f41a"' /tmp/x-ui.sh
+          bash -n /tmp/x-ui.sh
