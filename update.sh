@@ -558,7 +558,7 @@ require_repo_files() {
 
 update_x-ui() {
     local install_parent="${xui_folder%/*}"
-    local staging_dir="" staged_panel="" new_xui_version=""
+    local staging_dir="" staged_panel="" new_xui_version="" expected_panel_version="" release_json="" download_tag=""
     cd "${install_parent}" || _fail "ERROR: Cannot access panel installation directory: ${install_parent}"
 
     load_xui_env
@@ -587,18 +587,32 @@ update_x-ui() {
         fi
     fi
     echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
-    # x-ui.sh, x-ui.rc and the unit files must come from the same release as
-    # the binary; only the rolling dev build tracks main.
-    script_ref="${tag_version}"
+    expected_panel_version="${tag_version}"
     if [[ "${tag_version}" == "dev-latest" ]]; then
-        script_ref="main"
+        release_json=$(${curl_bin} -fLsS --retry 3 --connect-timeout 15 --max-time 60 \
+            "https://api.github.com/repos/jrangus/3x-ui/releases/tags/dev-latest" 2> /dev/null) \
+            || _fail "ERROR: Failed to resolve the dev-latest release identity. The current installation is untouched."
+        expected_panel_version=$(printf '%s' "${release_json}" \
+            | sed -nE 's/.*"name":[[:space:]]*"Update channel: (3x-ui-[0-9]+)".*/\1/p' \
+            | head -n 1)
+        if [[ ! "${expected_panel_version}" =~ ^3x-ui-[0-9]{8}$ ]]; then
+            _fail "ERROR: dev-latest does not identify a dated jrangus release. The current installation is untouched."
+        fi
     fi
+    # dev-latest is only a mutable pointer. Install every component from the
+    # immutable dated tag advertised by that pointer, never from main and never
+    # by mixing dev-latest assets with another source revision.
+    download_tag="${expected_panel_version}"
+    echo -e "${green}Resolved immutable release: ${download_tag}${plain}"
+    # x-ui.sh, x-ui.rc and the unit files must come from the same release as
+    # the binary. Mutable branches are never used for an installation.
+    script_ref="${download_tag}"
     # The unit files are only fetched when the release tarball lacks them, so
     # they are checked at that point instead of here.
     local required_files=("x-ui.sh")
     [[ $release == "alpine" ]] && required_files+=("x-ui.rc")
     require_repo_files "${script_ref}" "${required_files[@]}"
-    ${curl_bin} -fLR --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 600 -o "${xui_folder}-linux-$(arch).tar.gz" "https://github.com/jrangus/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz" 2> /dev/null
+    ${curl_bin} -fLR --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 600 -o "${xui_folder}-linux-$(arch).tar.gz" "https://github.com/jrangus/3x-ui/releases/download/${download_tag}/x-ui-linux-$(arch).tar.gz" 2> /dev/null
     if [[ $? -ne 0 ]]; then
         _fail "ERROR: Failed to download x-ui, please be sure that your server can access GitHub"
     fi
@@ -611,7 +625,7 @@ update_x-ui() {
     # predating the sidecar) is tolerated with a warning.
     archive="${xui_folder}-linux-$(arch).tar.gz"
     rm -f "${archive}.sha256"
-    sidecar_code=$(${curl_bin} -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${archive}.sha256" -w '%{http_code}' "https://github.com/jrangus/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz.sha256" 2> /dev/null)
+    sidecar_code=$(${curl_bin} -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${archive}.sha256" -w '%{http_code}' "https://github.com/jrangus/3x-ui/releases/download/${download_tag}/x-ui-linux-$(arch).tar.gz.sha256" 2> /dev/null)
     if [[ "${sidecar_code}" == "200" ]]; then
         expected_sha256=$(awk 'NR == 1 {print $1}' "${archive}.sha256")
         actual_sha256=$(sha256sum "${archive}" | awk '{print $1}')
@@ -660,6 +674,10 @@ update_x-ui() {
     if [[ -z "${new_xui_version}" ]]; then
         rm -rf -- "${staging_dir}"
         _fail "ERROR: The downloaded x-ui binary did not report a version. The current installation is untouched."
+    fi
+    if [[ "${new_xui_version}" != "${expected_panel_version}" ]]; then
+        rm -rf -- "${staging_dir}"
+        _fail "ERROR: Release identity mismatch: requested ${expected_panel_version}, downloaded ${new_xui_version}. The current installation is untouched."
     fi
     echo -e "${green}Validated new x-ui version: ${new_xui_version}${plain}"
 

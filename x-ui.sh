@@ -136,6 +136,7 @@ run_repository_script() {
         version=$(${xui_folder}/x-ui -v 2> /dev/null || true)
         case "$version" in
             dev+[0-9a-fA-F]*) ref="${version#dev+}" ;;
+            3x-ui-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ref="${version}" ;;
             [0-9]*.[0-9]*.[0-9]*) ref="v${version}" ;;
             v[0-9]*.[0-9]*.[0-9]*) ref="${version}" ;;
         esac
@@ -251,11 +252,13 @@ installed_script_url() {
     ver=$("${xui_folder}/x-ui" -v 2> /dev/null | tr -d '[:space:]')
     if [[ "$ver" =~ ^dev\+([0-9a-fA-F]{7,40})$ ]]; then
         echo "https://raw.githubusercontent.com/jrangus/3x-ui/${BASH_REMATCH[1]}/x-ui.sh"
+    elif [[ "$ver" =~ ^3x-ui-[0-9]{8}$ ]] && curl -fsIL -o /dev/null "https://raw.githubusercontent.com/jrangus/3x-ui/${ver}/x-ui.sh"; then
+        echo "https://raw.githubusercontent.com/jrangus/3x-ui/${ver}/x-ui.sh"
     elif [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && curl -fsIL -o /dev/null "https://raw.githubusercontent.com/jrangus/3x-ui/v${ver}/x-ui.sh"; then
         echo "https://raw.githubusercontent.com/jrangus/3x-ui/v${ver}/x-ui.sh"
     else
-        echo -e "${yellow}No x-ui.sh published for the installed version (${ver:-unknown}), using main${plain}" >&2
-        echo "https://raw.githubusercontent.com/jrangus/3x-ui/main/x-ui.sh"
+        echo -e "${red}No immutable x-ui.sh is published for the installed version (${ver:-unknown}); refusing to mix it with main${plain}" >&2
+        return 1
     fi
 }
 

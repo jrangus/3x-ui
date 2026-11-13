@@ -128,6 +128,11 @@ jobs:
             LDFLAGS="$LDFLAGS -X github.com/mhsanaei/3x-ui/v3/internal/config.buildCommit=${SOURCE_COMMIT::8} -X github.com/mhsanaei/3x-ui/v3/internal/config.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           fi
           go build -buildvcs=true -ldflags "$LDFLAGS" -o xui-release -v .
+          BUILT_VERSION="$(./xui-release -v | tr -d '[:space:]')"
+          if [[ -n "$RELEASE_TAG" && "$BUILT_VERSION" != "$RELEASE_TAG" ]]; then
+            echo "release identity mismatch: requested=$RELEASE_TAG built=$BUILT_VERSION" >&2
+            exit 1
+          fi
           file xui-release
           ldd xui-release || echo "Static binary confirmed"
 
@@ -325,6 +330,11 @@ jobs:
             LDFLAGS="$LDFLAGS -X github.com/mhsanaei/3x-ui/v3/internal/config.buildCommit=${SOURCE_COMMIT:0:8} -X github.com/mhsanaei/3x-ui/v3/internal/config.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           fi
           go build -buildvcs=true -ldflags "$LDFLAGS" -o xui-release.exe -v .
+          BUILT_VERSION="$(./xui-release.exe -v | tr -d '[:space:]')"
+          if [[ -n "$RELEASE_TAG" && "$BUILT_VERSION" != "$RELEASE_TAG" ]]; then
+            echo "release identity mismatch: requested=$RELEASE_TAG built=$BUILT_VERSION" >&2
+            exit 1
+          fi
 
       - name: Copy and download resources
         shell: pwsh
