@@ -54,13 +54,12 @@ interface MemberRow {
   email: string;
 }
 
-type ExitSourceCategory = 'xnvgatebox_stable' | 'new_residential' | 'new_native_datacenter';
+type ExitSourceCategory = 'xnvgatebox_stable' | 'sstp_pool';
 type ExitSourceFilter = ExitSourceCategory | 'all';
 
 const SOURCE_LABELS: Record<ExitSourceCategory, string> = {
   xnvgatebox_stable: 'xnvgatebox 稳定池',
-  new_residential: '新增住宅池',
-  new_native_datacenter: '新增原生机房池',
+  sstp_pool: 'SSTP 出口池',
 };
 
 function sourceLabel(source: ExitSourceCategory | undefined) {
@@ -180,7 +179,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
     );
     if (selectedSources.size !== 1) {
       messageApi.warning(
-        '一个订阅组只能使用一种 IP 来源；请分别创建 xnvgatebox 稳定池、新增住宅池或新增原生机房池订阅。',
+        '一个订阅组只能使用一种 IP 来源；请分别创建 xnvgatebox 稳定池或 SSTP 出口池订阅。',
       );
       return;
     }
@@ -288,8 +287,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
             }}
             options={[
               { value: 'xnvgatebox_stable', label: 'xnvgatebox 稳定池（推荐）' },
-              { value: 'new_residential', label: '新增住宅池' },
-              { value: 'new_native_datacenter', label: '新增原生机房池' },
+              { value: 'sstp_pool', label: 'SSTP 出口池' },
               { value: 'all', label: '全部分类（仅查看，不可混合创建）' },
             ]}
             style={{ width: 230 }}
@@ -383,11 +381,7 @@ export default function ExitPoolTab(_: ExitPoolTabProps) {
               render: (_, row: ExitRow) => (
                 <Tag
                   color={
-                    row.sourceCategory === 'xnvgatebox_stable'
-                      ? 'blue'
-                      : row.sourceCategory === 'new_residential'
-                        ? 'green'
-                        : 'gold'
+                    row.sourceCategory === 'xnvgatebox_stable' ? 'blue' : 'green'
                   }
                 >
                   {sourceLabel(row.sourceCategory)}

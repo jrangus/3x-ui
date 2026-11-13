@@ -25,14 +25,15 @@ import (
 )
 
 const (
-	exitPoolDir            = "/var/lib/xnvgatebox/fanout"
-	exitPoolClientPrefix   = "xnv3-"
-	exitPoolClientDomain   = "@exit.local"
-	exitPoolOutboundPrefix = "xnv3-exit-"
-	exitPoolGroupPrefix    = "Exit Pool / "
-	exitPoolSourceStable   = "xnvgatebox_stable"
-	exitPoolSourceHome     = "new_residential"
-	exitPoolSourceNativeDC = "new_native_datacenter"
+	exitPoolDir                  = "/var/lib/xnvgatebox/fanout"
+	exitPoolClientPrefix         = "xnv3-"
+	exitPoolClientDomain         = "@exit.local"
+	exitPoolOutboundPrefix       = "xnv3-exit-"
+	exitPoolGroupPrefix          = "Exit Pool / "
+	exitPoolSourceStable         = "xnvgatebox_stable"
+	exitPoolSourceSSTP           = "sstp_pool"
+	exitPoolSourceLegacyHome     = "new_residential"
+	exitPoolSourceLegacyNativeDC = "new_native_datacenter"
 )
 
 var exitPoolSubIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{6,40}$`)
@@ -155,18 +156,26 @@ func parseExitPoolComment(value string) (ExitPoolMember, bool) {
 	if len(p) == 6 {
 		source = p[5]
 	}
-	if !validExitPoolSource(source) {
+	source, ok := normalizeExitPoolSource(source)
+	if !ok {
 		return ExitPoolMember{}, false
 	}
 	return ExitPoolMember{Slot: slot, Region: p[2], Country: p[3], ExitIP: p[4], SourceCategory: source}, true
 }
 
 func validExitPoolSource(source string) bool {
+	_, ok := normalizeExitPoolSource(source)
+	return ok
+}
+
+func normalizeExitPoolSource(source string) (string, bool) {
 	switch source {
-	case exitPoolSourceStable, exitPoolSourceHome, exitPoolSourceNativeDC:
-		return true
+	case exitPoolSourceStable:
+		return exitPoolSourceStable, true
+	case exitPoolSourceSSTP, exitPoolSourceLegacyHome, exitPoolSourceLegacyNativeDC:
+		return exitPoolSourceSSTP, true
 	default:
-		return false
+		return "", false
 	}
 }
 
@@ -174,7 +183,9 @@ func normalizeExitPoolExit(e ExitPoolExit) (ExitPoolExit, error) {
 	if e.SourceCategory == "" {
 		e.SourceCategory = exitPoolSourceStable
 	}
-	if !validExitPoolSource(e.SourceCategory) {
+	var ok bool
+	e.SourceCategory, ok = normalizeExitPoolSource(e.SourceCategory)
+	if !ok {
 		return ExitPoolExit{}, fmt.Errorf("unrecognized exit-pool source category %q", e.SourceCategory)
 	}
 	e.Stable = e.SourceCategory == exitPoolSourceStable
@@ -183,14 +194,9 @@ func normalizeExitPoolExit(e ExitPoolExit) (ExitPoolExit, error) {
 		if (e.Transport != "" && e.Transport != "openvpn") || e.ProxyAddress != "" || e.ProxyPort != 0 || e.Port < 1 || e.Port > 65535 {
 			return ExitPoolExit{}, fmt.Errorf("stable exit slot %d has an invalid listener", e.Slot)
 		}
-	case exitPoolSourceHome:
-		if e.IPType != "strict_residential" && e.IPType != "likely_residential" {
-			return ExitPoolExit{}, fmt.Errorf("new residential exit slot %d lacks residential evidence", e.Slot)
-		}
-	case exitPoolSourceNativeDC:
-		if !e.Native || (e.IPType != "datacenter" && e.IPType != "business_isp") {
-			return ExitPoolExit{}, fmt.Errorf("new native datacenter exit slot %d lacks native datacenter evidence", e.Slot)
-		}
+	case exitPoolSourceSSTP:
+		// This is a source/transport boundary only. Connectivity is verified by
+		// xnvgatebox; no residential or datacenter claim is required here.
 	}
 	if e.SourceCategory != exitPoolSourceStable {
 		localManaged := e.Transport == "sstp" && e.ProxyAddress == "" && e.ProxyPort == 0 && e.Port >= 1 && e.Port <= 65535 && e.Slot >= 1 && e.Slot < 100000
@@ -278,10 +284,8 @@ func ExitPoolClientDisplayName(client model.Client) (string, bool) {
 
 func exitPoolSourceNameToken(source string) string {
 	switch source {
-	case exitPoolSourceHome:
-		return "new-residential"
-	case exitPoolSourceNativeDC:
-		return "new-native-dc"
+	case exitPoolSourceSSTP:
+		return "sstp"
 	default:
 		return "xnvgatebox-stable"
 	}
@@ -295,7 +299,7 @@ func validateExitPoolGroupSources(exits []ExitPoolExit) error {
 			continue
 		}
 		if source != exit.SourceCategory {
-			return errors.New("one subscription group cannot mix xnvgatebox stable, new residential, and new native datacenter exits; create one group per source category")
+			return errors.New("one subscription group cannot mix xnvgatebox stable and SSTP pool exits; create one group per source category")
 		}
 	}
 	return nil

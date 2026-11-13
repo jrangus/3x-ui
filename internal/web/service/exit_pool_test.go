@@ -16,9 +16,9 @@ func TestExitPoolClientDisplayName(t *testing.T) {
 	if !ok || got != "World-xnvgatebox-stable-JP-S7" {
 		t.Fatalf("display name = %q, %v", got, ok)
 	}
-	client.Comment = "xnv3:8:US:United States:198.51.100.8:new_residential"
-	if got, ok := ExitPoolClientDisplayName(client); !ok || got != "World-new-residential-US-S8" {
-		t.Fatalf("residential display name = %q, %v", got, ok)
+	client.Comment = "xnv3:8:US:United States:198.51.100.8:sstp_pool"
+	if got, ok := ExitPoolClientDisplayName(client); !ok || got != "World-sstp-US-S8" {
+		t.Fatalf("SSTP display name = %q, %v", got, ok)
 	}
 	if _, ok := ExitPoolClientDisplayName(model.Client{Group: "staff"}); ok {
 		t.Fatal("ordinary client identified as exit-pool client")
@@ -31,34 +31,28 @@ func TestExitPoolSourceCategoriesAreIsolatedAndBackwardCompatible(t *testing.T) 
 		t.Fatalf("legacy member source = %q, %v", old.SourceCategory, ok)
 	}
 
-	home, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100101, SourceCategory: exitPoolSourceHome, IPType: "strict_residential", ProxyAddress: "8.8.8.8", ProxyPort: 1080})
+	home, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100101, SourceCategory: exitPoolSourceSSTP, IPType: "unknown", ProxyAddress: "8.8.8.8", ProxyPort: 1080})
 	if err != nil || home.Stable {
-		t.Fatalf("verified new residential exit rejected or marked stable: %+v, %v", home, err)
+		t.Fatalf("SSTP-class supplemental exit rejected or marked stable: %+v, %v", home, err)
 	}
-	localHome, err := normalizeExitPoolExit(ExitPoolExit{Slot: 2, Port: 17929, SourceCategory: exitPoolSourceHome, IPType: "likely_residential", Transport: "sstp", SocksUser: "u", SocksPass: "p"})
+	localHome, err := normalizeExitPoolExit(ExitPoolExit{Slot: 2, Port: 17929, SourceCategory: exitPoolSourceSSTP, IPType: "unknown", Transport: "sstp", SocksUser: "u", SocksPass: "p"})
 	if err != nil || localHome.Stable || localHome.ProxyAddress != "" {
 		t.Fatalf("promoted SSTP residential exit rejected: %+v, %v", localHome, err)
 	}
-	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 2, Port: 17929, SourceCategory: exitPoolSourceHome, IPType: "likely_residential", Transport: "sstp", ProxyAddress: "127.0.0.1"}); err == nil {
+	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 2, Port: 17929, SourceCategory: exitPoolSourceSSTP, IPType: "unknown", Transport: "sstp", ProxyAddress: "127.0.0.1"}); err == nil {
 		t.Fatal("ambiguous local promoted listener accepted")
 	}
-	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 2, Port: 17929, SourceCategory: exitPoolSourceHome, IPType: "likely_residential"}); err == nil {
+	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 2, Port: 17929, SourceCategory: exitPoolSourceSSTP, IPType: "unknown"}); err == nil {
 		t.Fatal("untyped optional loopback listener accepted")
 	}
-	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100102, SourceCategory: exitPoolSourceHome, IPType: "datacenter", ProxyAddress: "8.8.8.8", ProxyPort: 1080}); err == nil {
-		t.Fatal("datacenter exit admitted to the new residential category")
+	legacy, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100104, SourceCategory: exitPoolSourceLegacyNativeDC, IPType: "datacenter", Native: true, ProxyAddress: "8.8.8.8", ProxyPort: 1080})
+	if err != nil || legacy.SourceCategory != exitPoolSourceSSTP {
+		t.Fatalf("legacy category was not migrated to SSTP pool: %+v, %v", legacy, err)
 	}
-	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100103, SourceCategory: exitPoolSourceNativeDC, IPType: "datacenter", ProxyAddress: "8.8.8.8", ProxyPort: 1080}); err == nil {
-		t.Fatal("unverified native datacenter exit admitted")
-	}
-	native, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100104, SourceCategory: exitPoolSourceNativeDC, IPType: "datacenter", Native: true, ProxyAddress: "8.8.8.8", ProxyPort: 1080})
-	if err != nil || native.Stable {
-		t.Fatalf("verified new native datacenter exit rejected or marked stable: %+v, %v", native, err)
-	}
-	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100105, SourceCategory: exitPoolSourceHome, IPType: "strict_residential", ProxyAddress: "127.0.0.1", ProxyPort: 1080}); err == nil {
+	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100105, SourceCategory: exitPoolSourceSSTP, IPType: "unknown", ProxyAddress: "127.0.0.1", ProxyPort: 1080}); err == nil {
 		t.Fatal("private supplemental proxy was accepted")
 	}
-	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100106, SourceCategory: exitPoolSourceHome, IPType: "strict_residential", ProxyAddress: "2001:4860:4860::8888", ProxyPort: 1080}); err == nil {
+	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 100106, SourceCategory: exitPoolSourceSSTP, IPType: "unknown", ProxyAddress: "2001:4860:4860::8888", ProxyPort: 1080}); err == nil {
 		t.Fatal("IPv6 supplemental proxy was accepted before IPv6 egress verification is supported")
 	}
 	if _, err := normalizeExitPoolExit(ExitPoolExit{Slot: 1, Port: 1080, SourceCategory: exitPoolSourceStable, ProxyAddress: "8.8.8.8", ProxyPort: 1080}); err == nil {
@@ -68,7 +62,7 @@ func TestExitPoolSourceCategoriesAreIsolatedAndBackwardCompatible(t *testing.T) 
 
 func TestExitPoolGroupRejectsMixedSources(t *testing.T) {
 	stable := ExitPoolExit{Slot: 1, SourceCategory: exitPoolSourceStable}
-	home := ExitPoolExit{Slot: 2, SourceCategory: exitPoolSourceHome}
+	home := ExitPoolExit{Slot: 2, SourceCategory: exitPoolSourceSSTP}
 	if err := validateExitPoolGroupSources([]ExitPoolExit{stable, stable}); err != nil {
 		t.Fatalf("same-source group rejected: %v", err)
 	}
@@ -93,11 +87,11 @@ func TestExitPoolRoutingUsesIsolatedProxyAndFailsClosed(t *testing.T) {
 	if stable["address"] != "127.0.0.1" || stable["port"] != 20001 || stable["users"] == nil {
 		t.Fatalf("unexpected stable SOCKS server: %#v", stable)
 	}
-	extra := exitPoolSOCKSServer(ExitPoolExit{SourceCategory: exitPoolSourceHome, ProxyAddress: "8.8.8.8", ProxyPort: 1080})
+	extra := exitPoolSOCKSServer(ExitPoolExit{SourceCategory: exitPoolSourceSSTP, ProxyAddress: "8.8.8.8", ProxyPort: 1080})
 	if extra["address"] != "8.8.8.8" || extra["port"] != 1080 || extra["users"] != nil {
 		t.Fatalf("unexpected supplemental SOCKS server: %#v", extra)
 	}
-	promoted := exitPoolSOCKSServer(ExitPoolExit{SourceCategory: exitPoolSourceHome, Port: 17929, SocksUser: "u", SocksPass: "p"})
+	promoted := exitPoolSOCKSServer(ExitPoolExit{SourceCategory: exitPoolSourceSSTP, Port: 17929, SocksUser: "u", SocksPass: "p"})
 	if promoted["address"] != "127.0.0.1" || promoted["port"] != 17929 || promoted["users"] == nil {
 		t.Fatalf("unexpected promoted SSTP SOCKS server: %#v", promoted)
 	}
